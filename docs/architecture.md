@@ -164,7 +164,8 @@ status `voided`. For ambiguous rules or cancelled events.
 
 | Table | Key columns | Notes |
 |---|---|---|
-| `profiles` | `id` (= `auth.users.id`), `email`, `display_name`, `role` (member / moderator / admin), `created_at` | Created on first sign-in |
+| `profiles` | `id` (= `auth.users.id`), `email`, `display_name`, `role` (member / moderator / admin), `suspended_at`, `leaderboard_opt_out`, `created_at` | Created on first sign-in; suspension and removal rules in SOP-08 |
+| `settings` | `key`, `value`, `updated_by`, `updated_at` | Economy knobs: signup bonus, weekly stipend, balance cap, default `b` (SOP-08 §5); env vars until M5 |
 | `balances` | `user_id`, `points` | Cache; must equal the ledger sum |
 | `categories` | `id`, `slug`, `name` | Athletics, Campus Life, Academics, Weather, … |
 | `markets` | §4 columns plus `slug`, `created_at`, `opened_at`, `closed_at`, `resolved_at`, `finalized_at` | `CHECK` on status; index `(status, close_at)` |

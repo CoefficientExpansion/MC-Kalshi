@@ -9,7 +9,7 @@ Code is the primary implementer.
 - `docs/development-model.md` — spec → plan → build (TDD) → review → ship; milestones; Definition of Done
 - `docs/skills-matrix.md` — which Claude Code skills/plugins are on for this project and when to use them
 - `docs/adr/` — decisions already made; add an ADR before changing any of them
-- `docs/sops/` — step-by-step procedures (session start, feature work, REA research, market ops, release, incidents)
+- `docs/sops/` — step-by-step procedures (index in `docs/sops/README.md`: session start, feature work, REA research, market ops, release, incidents, environment and secrets, admin operations, data and privacy)
 - `docs/specs/` — one spec per feature slice; `docs/research/kalshi/` — REA evidence and design notes
 
 ## Hard constraints (do not relax without an ADR)

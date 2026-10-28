@@ -1,0 +1,52 @@
+# SOP-07: Environment and secrets setup
+
+**Purpose**: stand up the `dev` and `prod` environments once, keep secrets out of git, and make a new machine productive in under an hour. Required before milestone M0 merges.
+
+## Accounts and projects
+| Service | What to create | Notes |
+|---|---|---|
+| GitHub | private repo `mc-kalshi`, default branch `main`, branch protection: require CI green | Actions free tier |
+| Vercel | one project linked to the repo; Preview deployments from branches, Production from `main` | Hobby plan; cron jobs allowed (daily and minutely routes) |
+| Supabase | two projects: `mc-kalshi-dev`, `mc-kalshi-prod`; region `us-east-1` | Free tier each. Prod pauses after 7 days idle on free tier: keep the ledger invariant cron hitting it, or upgrade before beta |
+| Email (OTP) | Supabase's built-in sender is rate-limited to a few emails per hour | Before beta, configure custom SMTP (Resend free tier) in Supabase Auth → SMTP settings |
+
+## Environment variables
+Committed template `.env.example` (no values); real values in `.env.local` (gitignored) and in Vercel per environment.
+
+| Variable | Scope | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_APP_URL` | public | absolute URL for links in OTP emails |
+| `NEXT_PUBLIC_SUPABASE_URL` | public | Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | public | auth client key; tables are RLS deny-all so it reads nothing directly |
+| `SUPABASE_SERVICE_ROLE_KEY` | server only | admin auth operations (never shipped to the browser) |
+| `DATABASE_URL` | server only | Postgres connection for Drizzle (use the pooled connection string on Vercel) |
+| `CRON_SECRET` | server only | shared secret checked by cron routes |
+| `ALLOWED_EMAIL_DOMAINS` | server only | `maryvillecollege.edu,my.maryvillecollege.edu` |
+| `TRADING_PAUSED` | server only | `true` freezes `placeTrade` (SOP-06) |
+| `STIPEND_POINTS_WEEKLY`, `SIGNUP_BONUS_POINTS`, `BALANCE_CAP_POINTS` | server only | economy knobs until a `settings` table exists |
+
+Mapping: Vercel **Preview** → `mc-kalshi-dev` keys; Vercel **Production** → `mc-kalshi-prod` keys. Local `.env.local` → `dev`.
+
+## Steps: first-time setup
+1. Create the Supabase projects. In each: Auth → Providers → Email: enable, OTP on, "Confirm email" on; set Site URL and redirect URLs to the app URLs; add the domain-allowlist auth hook (`before-user-created`) from `apps/web/supabase/hooks/` once M2 ships it.
+2. Copy keys into `.env.local` (dev) and into Vercel (Preview = dev, Production = prod). Never paste a key into chat, an issue, or a commit.
+3. `npm ci`, `npm run db:migrate` against dev, `npm run db:seed` (categories + three sample markets), `npm run dev`, sign in with a test `@my.maryvillecollege.edu` address, confirm a non-college address is rejected.
+4. Push a branch; confirm the Vercel preview builds and signs in against dev.
+5. Run `npm run db:migrate` against prod only when releasing (SOP-05).
+
+## Steps: new machine
+1. Install Node 24 LTS (≥ 24.22.1), Git, Claude Code; clone the repo; `npm ci`.
+2. Get `.env.local` values from the project lead through a password manager share, never email or chat.
+3. `powershell -ExecutionPolicy Bypass -File scripts\setup-rea.ps1` only if REA research is planned on that machine.
+4. Start Claude Code from the repo root; follow SOP-01.
+
+## Steps: rotate a secret
+1. Generate the new value in the provider (Supabase: Settings → API → rotate; `CRON_SECRET`: `openssl rand -hex 32`).
+2. Update Vercel (both environments if shared) and `.env.local`; redeploy production.
+3. Confirm sign-in and one 10-point trade on prod; confirm the cron route returns 200 with the new secret.
+4. Record the rotation (date, variable, reason) in `docs/incidents/` if it was a leak, otherwise in the CHANGELOG.
+
+## Checks
+- `git grep -n "SUPABASE_SERVICE_ROLE_KEY\|DATABASE_URL" -- ':!.env.example' ':!docs'` returns only code that reads `process.env`.
+- `.env.example` lists every variable the code reads (CI greps for mismatches once M0 adds the check).
+- The anon key cannot read any table: `select * from markets` through the anon client returns zero rows.
