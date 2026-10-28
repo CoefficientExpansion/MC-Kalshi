@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "enabledPlugins": {
+    "academic-research-skills@academic-research-skills": false
+  },
+  "skillOverrides": {
+    "experimental-design": "off",
+    "research-lookup": "off",
+    "scientific-critical-thinking": "off",
+    "scientific-slides": "off",
+    "scientific-writing": "off",
+    "statistical-analysis": "off",
+    "statistical-power": "off",
+    "anthropic-skills:academic-paper": "off",
+    "anthropic-skills:academic-paper-reviewer": "off",
+    "anthropic-skills:academic-pipeline": "off",
+    "anthropic-skills:deep-research": "off",
+    "anthropic-skills:docx": "off",
+    "anthropic-skills:pptx": "off",
+    "anthropic-skills:xlsx": "off",
+    "anthropic-skills:pdf": "off",
+    "anthropic-skills:google-workspace": "off",
+    "anthropic-skills:computer-use": "off",
+    "anthropic-skills:learn": "off",
+    "anthropic-skills:morning": "off",
+    "anthropic-skills:import-memory": "off",
+    "anthropic-skills:docs": "off"
+  }
+}
