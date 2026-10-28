@@ -5,7 +5,13 @@ Design notes from studying Kalshi's public web app with REA, under the boundarie
 
 | Note | Question | Status |
 |---|---|---|
-| _(none yet)_ | | |
+| [market-page.md](market-page.md) | What a market page shows and how it is laid out on desktop and mobile | done 2026-10-28 |
+| [order-ticket.md](order-ticket.md) | Ticket inputs, what it computes (fees, payout, odds), when it recomputes | done 2026-10-28 |
+| portfolio-positions.md | Open positions, P&L, settled markets | not started: needs a signed-in page the human opens (REA connect mode); logged-out observation cannot reach it |
+| [market-lifecycle.md](market-lifecycle.md) | Statuses over a market's life; open/close/settlement/payout copy | done 2026-10-28 (closed/settled page not observed) |
+| [event-grouping.md](event-grouping.md) | Series → event → market hierarchy, URLs, navigation, API vocabulary | done 2026-10-28 |
+
+Evidence files: REA captures are retained in the MCP session and were saved locally under the session's `tool-results` folder (not committed). Screenshots used for the notes are in the session scratchpad; nothing from Kalshi is copied into this repo.
 
 Suggested first questions (one note each):
 1. `market-page.md` — What does a market page show (prices, chart, rules, dates, volume) and how is it laid out on desktop and mobile?
