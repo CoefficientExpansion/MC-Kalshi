@@ -4,12 +4,17 @@ import { dynamic, GET } from "./route";
 
 const mocks = vi.hoisted(() => ({
   db: undefined as unknown,
-  user: null as { id: string } | null,
+  session: null as { userId: string; suspended: boolean } | null,
   state: null as unknown,
   load: vi.fn(),
 }));
 vi.mock("@/db", () => ({ getDb: () => mocks.db }));
-vi.mock("@/server/auth", () => ({ getCurrentUser: async () => mocks.user }));
+vi.mock("@/server/auth", () => ({
+  getSessionMember: async () => mocks.session,
+  getCurrentUser: async () => {
+    throw new Error("the state route must use getSessionMember");
+  },
+}));
 vi.mock("@/server/market-state", () => ({ loadMarketState: mocks.load }));
 
 const ID = "3f2b8c1e-9d4a-4b6e-8f10-2a3b4c5d6e7f";
@@ -30,7 +35,7 @@ const call = (id = ID) =>
 
 beforeEach(() => {
   mocks.db = { fake: true };
-  mocks.user = null;
+  mocks.session = null;
   mocks.load.mockReset();
   mocks.load.mockResolvedValue(STATE);
 });
@@ -49,11 +54,21 @@ describe("GET /api/markets/[id]/state", () => {
   });
 
   it("passes the signed-in member's id", async () => {
-    mocks.user = { id: "00000000-0000-4000-8000-000000000001" };
+    mocks.session = { userId: "00000000-0000-4000-8000-000000000001", suspended: false };
     mocks.load.mockResolvedValue({ ...STATE, balance: 10, position: undefined });
     const res = await call();
     expect(res.status).toBe(200);
-    expect(mocks.load).toHaveBeenCalledWith(mocks.db, ID, mocks.user.id);
+    expect(mocks.load).toHaveBeenCalledWith(mocks.db, ID, mocks.session.userId);
+  });
+
+  it("still gives a suspended member their balance and position", async () => {
+    mocks.session = { userId: "00000000-0000-4000-8000-000000000002", suspended: true };
+    const position = { contractsYes: 1, contractsNo: 0, costBasisPoints: 50 };
+    mocks.load.mockResolvedValue({ ...STATE, balance: 10, position });
+    const res = await call();
+    expect(res.status).toBe(200);
+    expect(mocks.load).toHaveBeenCalledWith(mocks.db, ID, mocks.session.userId);
+    expect(await res.json()).toMatchObject({ balance: 10, position });
   });
 
   it("is 404 for an unknown or hidden market", async () => {

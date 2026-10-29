@@ -24,6 +24,12 @@ export async function AccountControl() {
 
   return (
     <div className="flex items-center gap-3">
+      <Link
+        href="/portfolio"
+        className={`inline-flex min-h-11 items-center rounded-md px-2 font-semibold hover:underline ${focus}`}
+      >
+        Portfolio
+      </Link>
       <p className="text-sm leading-tight">
         <span className="block max-w-40 truncate font-semibold" title={member.displayName}>
           {member.displayName}

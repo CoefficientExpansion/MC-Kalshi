@@ -254,7 +254,7 @@ export function OrderTicket(props: OrderTicketProps) {
       balance={state.balance ?? null}
       held={held}
       result={result}
-      requoteRows={requote ? requoteRows(requote.order, requote.requote) : null}
+      requoteRows={requote ? requoteRows(requote.order, requote.requote, held) : null}
       status={status}
       canMax={maxText !== null && gate === "open"}
       signInHref={props.signInHref ?? "/sign-in"}

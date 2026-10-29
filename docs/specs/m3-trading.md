@@ -28,14 +28,14 @@ Out: resolve/void/payouts (M4), real rate limiter and admin tools (M5), limit or
 leaderboard, "Also trading" block, realized-vs-unrealized P&L split (needs M4 settlement data).
 
 ## Acceptance criteria
-- [ ] Given a signed-in member with 10,000 points and a fresh b=100 market, when they buy YES with 500 points, then one trade of 9.76 contracts exists, balance is 9,500, the pool ledger is +500, `q_yes = 9.761859`, a snapshot exists, and the ticket quote matched.
-- [ ] Given a stale quote, when the price moved more than 2 points per contract, then nothing is written and the ticket offers the new price.
-- [ ] Given the same idempotency key sent concurrently, then exactly one trade exists and every caller gets it.
+- [x] Given a signed-in member with 10,000 points and a fresh b=100 market, when they buy YES with 500 points, then one trade of 9.76 contracts exists, balance is 9,500, the pool ledger is +500, `q_yes = 9.761859`, a snapshot exists, and the ticket quote matched.
+- [x] Given a stale quote, when the price moved more than 2 points per contract, then nothing is written and the ticket offers the new price.
+- [x] Given the same idempotency key sent concurrently, then exactly one trade exists and every caller gets it.
 - [ ] Given two parallel trades (real Postgres), then they serialize on the market lock and invariants hold.
-- [ ] Given a closed, paused, suspended, or underfunded case, then the matching error code returns and no rows change.
-- [ ] Given a random trade sequence, then ledger sum is 0, balances equal the ledger, positions equal `q`.
+- [x] Given a closed, paused, suspended, or underfunded case, then the matching error code returns and no rows change.
+- [x] Given a random trade sequence, then ledger sum is 0, balances equal the ledger, positions equal `q`.
 - [ ] Given the Playwright loop, then buy, sell, portfolio and the invariant route all pass; e2e sessions come from the Supabase admin API (if the fallback test-session route is used instead, it is 404 when `VERCEL` is set).
-- [ ] No UI string contains "bet", "$", "¢" or "cash out".
+- [x] No UI string contains "bet", "$", "¢" or "cash out".
 
 ## Key decisions
 1. **Core vs action.** `server/trading.ts` exports `placeTrade(db, userId, input, opts?)` (all logic, testable
@@ -343,8 +343,8 @@ Parallel chunks A–D start after task 0. Each chunk can go to a separate implem
 5. `buildTicketQuote` + `trade-copy.ts` + copy guard — TDD. Verify by: quote equals server quote; banned-word scan.
 6. `OrderTicket` (desktop card, mobile sheet), polling hook, all states and slippage re-quote. Verify by: manual 390 px and 1280 px screenshots, keyboard and screen-reader pass.
 **C. Portfolio and chart**
-7. `getPortfolio`, `getPriceHistory` (+ downsampling) — TDD on PGlite. Verify by: loader tests with fixtures from `placeTrade`.
-8. `PriceChart`, position card, `/portfolio`. Verify by: render tests, screenshot light/dark, `aria-label` summary.
+7. [x] `getPortfolio`, `getPriceHistory` (+ downsampling) — TDD on PGlite. Verify by: loader tests with fixtures from `placeTrade` (`server/portfolio.test.ts`, `server/price-history.test.ts`).
+8. [x] `PriceChart`, position card, `/portfolio`. Verify by: render tests and the `aria-label` summary (`components/market/price-chart.test.ts`, `position-card.test.ts`, `app/portfolio/page.test.ts`). Still open: light/dark screenshots by a human.
 **D. Invariants and CI**
 9. `checkTradingInvariants` + deliberate-corruption tests (corrupt rows directly in a test DB, for example `UPDATE markets SET q_yes` or an extra `positions` row; the append-only triggers cover only `ledger_entries` and `trades`) — verify by: each issue type is detected.
 10. Cron route, `vercel.json`, `CRON_SECRET` check. Verify by: 401/200/500 route tests; log line shape.
@@ -380,4 +380,39 @@ Waves:
 ## Next
 Hand chunks A–D to implementers after task 0; the orchestrator adds the README row. M4 decides positions after
 resolve/void and extends `checkTradingInvariants` accordingly.
-Ticket UI (tasks 5–6) is built as `LiveOrderTicket` in `components/market/order-ticket.tsx`; still to do: replace `OrderTicketPlaceholder` on `/markets/[slug]` (pass `placeTradeAction` as `submit`, the state DTO, account and `now`), then the 390 px / 1280 px screenshots and keyboard and screen-reader pass.
+Ticket UI (tasks 5–6) is built as `LiveOrderTicket` in `components/market/order-ticket.tsx` and is wired into
+`/markets/[slug]` through `components/market/market-trade-panel.tsx` (the placeholder is deleted); still to do: the
+390 px / 1280 px screenshots and keyboard and screen-reader pass, light/dark chart screenshots, and the e2e loop (task 12).
+
+## Decisions made while building tasks 7–8 and the page wiring (2026-10-29)
+1. **Portfolio header.** "Open positions" sums value now over markets in `open` or `closed` status only; resolved,
+   finalized and voided rows are still listed (after them, by `close_at`) but not added, since their value is
+   M4 settlement, not a price. Total = balance + that sum. Rows with zero contracts on both sides are hidden even
+   if their cost basis is not 0. Value per side is rounded before summing. Pure helper `lib/position-value.ts`
+   is shared by the loader and the position card.
+2. **Trade price in history** is the realized average `|cost_points| / |contracts|`, rounded and clamped to 1–99
+   (the same rule `placeTrade` uses for replays); trades store no engine average.
+3. **/portfolio access** uses `getSessionMember()`: signed out (or no database) redirects to `/sign-in`; a
+   suspended member may view it read-only. A failed load shows an "unavailable" notice, not a 500.
+4. **Chart range start.** `ALL` starts at `opened_at ?? created_at` with the first trade's `prob_before` (else
+   0.5). `1D`/`1W` start at `max(opening, now − span)`; when that cuts the history, the first point carries the
+   last snapshot before the cut (the price in force then), so the step line stays truthful.
+5. **Downsampling** splits `[from, now]` into 198 equal buckets and keeps the last snapshot per bucket; with the
+   start and "now" points that is at most 200 (`MAX_CHART_POINTS`). The range end uses the app clock (the page's
+   request time), which is fine for a read-only chart.
+6. **"No trades yet"** shows when the market has no snapshot at all (or under 2 points). A market with trades but
+   none inside the range draws a flat line at the carried price ("no change over the last day"), not the empty state.
+7. **Chart interaction.** Ranges are `<Link href="?range=…">` (server-rendered, `aria-current` on the active one,
+   unknown values fall back to `1W`). The chart is a small client component only for the hover/touch crosshair
+   (time in campus time and "YES NN%"); the crosshair is `aria-hidden`, and the `role="img"` label carries the
+   summary. Headline change is in whole display points: "up 4", "down 3", "no change".
+8. **Refresh after a trade.** `MarketTradePanel` wraps `LiveOrderTicket` and calls `router.refresh()` on success,
+   so the server-rendered headline price, chart, position card and header balance update without a reload.
+9. **Page layout.** On narrow screens the order is headline → chart → YES/NO buttons → position card → prices,
+   rules, dates (the research note's "buttons under the chart"); from 1024 px the ticket and position card are a
+   sticky right column spanning both blocks. The page passes `getSessionMember()`'s balance and position even
+   for a suspended member, so the ticket shows "Your account can't trade right now".
+10. **Polling for suspended members.** `GET /api/markets/[id]/state` now uses `getSessionMember()` too, so the
+   poll does not drop a suspended member's balance and position.
+11. **Sell requote.** After `slippage_exceeded` on a sell, the requote rows keep "Left in position" (held minus
+   the order's contracts).
