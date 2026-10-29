@@ -95,7 +95,9 @@ test("stale quote: another member moves the price, the ticket asks to confirm th
     const otherPage = await other.newPage();
     await signIn(otherPage, collegeEmail("stale-b"));
     await otherPage.goto(`/markets/${slug}`);
-    await buyYes(otherPage, 300);
+    // 1,500 points on a fresh b=100 market moves YES from about 50 to 57: well past the default
+    // 2-point slippage (300 points moved it only to 51, so the stale order still filled).
+    await buyYes(otherPage, 1500);
   } finally {
     await other.close();
   }

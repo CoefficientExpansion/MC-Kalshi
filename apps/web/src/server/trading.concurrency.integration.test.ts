@@ -32,7 +32,9 @@ const TEST_MS = 30_000;
 const NO_LIMIT: PlaceTradeOptions = { tradingPaused: false, rateLimit: async () => null };
 
 const user = (n: number) => `66666666-6666-4666-8666-${String(n).padStart(12, "0")}`;
-const key = (label: string) => `conc-${label}`.padEnd(16, "0");
+// Padded with "_", never a digit: padding "rl-1" with zeros would equal "rl-10" and turn one call
+// into a replay of another (it did: 22 "ok" results were 20 trades and 2 replays).
+const key = (label: string) => `conc-${label}`.padEnd(16, "_");
 
 /** Rejects after `ms` so a hung race fails the test with a reason. */
 async function within<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
@@ -410,6 +412,7 @@ describe.skipIf(!HAS_PG)("real Postgres: concurrent placeTrade", () => {
       const results = await within(pending.all, 20_000, "25 trades after release");
       const codes = results.map((r) => (r.ok ? "ok" : r.code));
       expect(codes.filter((c) => c === "ok")).toHaveLength(20);
+      expect(results.filter((r) => r.ok && r.replayed)).toHaveLength(0);
       expect(codes.filter((c) => c === "rate_limited")).toHaveLength(5);
       for (const r of results) {
         if (!r.ok && r.code === "rate_limited") expect(r.retryAfterSec).toBeGreaterThanOrEqual(1);
