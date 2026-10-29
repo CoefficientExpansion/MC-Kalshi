@@ -5,15 +5,15 @@
  */
 import {
   assertOutcome,
-  assertPosition,
   assertSide,
   describe,
   EngineError,
   MAX_CONTRACTS,
   MAX_POINTS,
   readFields,
+  readPosition,
 } from "./errors";
-import { noNegativeZero } from "./rounding";
+import { noNegativeZero, roundContracts } from "./rounding";
 import { payout, voidRefund } from "./settlement";
 import type { Outcome, PositionLike, Quote } from "./types";
 
@@ -37,15 +37,24 @@ function readObject<K extends string>(value: unknown, keys: readonly K[], what: 
   return readFields(value, keys, what);
 }
 
-/** Finite, within ±MAX_CONTRACTS; returns the amount in whole micro-contracts. */
+/**
+ * Non-zero, finite, within ±MAX_CONTRACTS and exactly on the six-decimal grid (no silent
+ * rounding: 5e-7 or 1.0000004 is rejected, not booked); returns whole micro-contracts.
+ */
 function fillMicros(contracts: unknown): number {
-  if (!Number.isFinite(contracts) || Math.abs(contracts as number) > MAX_CONTRACTS) {
+  if (
+    typeof contracts !== "number" ||
+    !Number.isFinite(contracts) ||
+    Math.abs(contracts) > MAX_CONTRACTS ||
+    roundContracts(contracts) !== contracts ||
+    contracts === 0
+  ) {
     throw new EngineError(
       "INVALID_CONTRACTS",
-      `fill contracts must be finite and within ±${MAX_CONTRACTS}, got ${describe(contracts)}`,
+      `fill contracts must be non-zero, finite, within ±${MAX_CONTRACTS} and on the six-decimal grid, got ${describe(contracts)}`,
     );
   }
-  return noNegativeZero(Math.round((contracts as number) * MICRO));
+  return Math.round(contracts * MICRO);
 }
 
 /**
@@ -54,7 +63,8 @@ function fillMicros(contracts: unknown): number {
  * or fill, or when a sell would take the user below zero contracts. Does not mutate `position`.
  */
 export function applyFill(position: Position, fill: Fill): Position {
-  assertPosition(position);
+  // Snapshots: neither `position` nor `fill` is read again below.
+  const held = readPosition(position);
   const { side, contracts, costPoints } = readObject(
     fill,
     ["side", "contracts", "costPoints"],
@@ -62,12 +72,6 @@ export function applyFill(position: Position, fill: Fill): Position {
   );
   assertSide(side);
   const delta = fillMicros(contracts);
-  if (delta === 0) {
-    throw new EngineError(
-      "INVALID_CONTRACTS",
-      `fill must move at least 1e-6 contracts, got ${describe(contracts)}`,
-    );
-  }
   if (!Number.isSafeInteger(costPoints)) {
     throw new EngineError(
       "INVALID_POINTS",
@@ -83,12 +87,12 @@ export function applyFill(position: Position, fill: Fill): Position {
       `costPoints ${cost} has the wrong sign for ${delta > 0 ? "a buy" : "a sell"}`,
     );
   }
-  const held = side === "YES" ? position.contractsYes : position.contractsNo;
-  const updatedMicros = Math.round(held * MICRO) + delta;
+  const onSide = side === "YES" ? held.contractsYes : held.contractsNo;
+  const updatedMicros = Math.round(onSide * MICRO) + delta;
   if (updatedMicros < 0) {
     throw new EngineError(
       "INVALID_CONTRACTS",
-      `cannot sell ${describe(-(contracts as number))} ${side} contracts: only ${held} held`,
+      `cannot sell ${describe(-(contracts as number))} ${side} contracts: only ${onSide} held`,
     );
   }
   if (updatedMicros > MAX_MICROS) {
@@ -97,18 +101,47 @@ export function applyFill(position: Position, fill: Fill): Position {
       `holdings on ${side} would exceed ${MAX_CONTRACTS} contracts`,
     );
   }
-  const costBasisPoints = noNegativeZero(position.costBasisPoints + cost);
+  const costBasisPoints = noNegativeZero(held.costBasisPoints + cost);
   if (Math.abs(costBasisPoints) > MAX_POINTS) {
     throw new EngineError("INVALID_POINTS", `cost basis would exceed ±${MAX_POINTS} points`);
   }
   const updated = noNegativeZero(updatedMicros / MICRO);
   return side === "YES"
-    ? { contractsYes: updated, contractsNo: noNegativeZero(position.contractsNo), costBasisPoints }
+    ? { contractsYes: updated, contractsNo: noNegativeZero(held.contractsNo), costBasisPoints }
     : {
-        contractsYes: noNegativeZero(position.contractsYes),
+        contractsYes: noNegativeZero(held.contractsYes),
         contractsNo: updated,
         costBasisPoints,
       };
+}
+
+const NOT_PAIRS = "positions must be an iterable of [user, position] pairs";
+
+/**
+ * Drains `positions` into an array of validated `[user, position]` pairs. A non-iterable input,
+ * an element that is not a two-element array, or any error the iterator or a getter throws
+ * becomes EngineError (INVALID_STATE), never a raw TypeError.
+ */
+function readPairs<K>(positions: unknown): Array<readonly [K, unknown]> {
+  if (typeof positions !== "object" || positions === null) {
+    throw new EngineError("INVALID_STATE", `${NOT_PAIRS}, got ${describe(positions)}`);
+  }
+  const pairs: Array<readonly [K, unknown]> = [];
+  try {
+    if (typeof (positions as { [Symbol.iterator]?: unknown })[Symbol.iterator] !== "function") {
+      throw new EngineError("INVALID_STATE", NOT_PAIRS);
+    }
+    for (const entry of positions as Iterable<unknown>) {
+      if (!Array.isArray(entry) || entry.length !== 2) {
+        throw new EngineError("INVALID_STATE", `${NOT_PAIRS}, got an element ${describe(entry)}`);
+      }
+      pairs.push([entry[0] as K, entry[1]]);
+    }
+  } catch (e) {
+    if (e instanceof EngineError) throw e;
+    throw new EngineError("INVALID_STATE", "positions could not be iterated");
+  }
+  return pairs;
 }
 
 function assertNewUser<K>(seen: Map<K, number>, user: K): void {
@@ -121,7 +154,8 @@ function assertNewUser<K>(seen: Map<K, number>, user: K): void {
  * Per-user payout when the market resolves to `outcome`, each computed by {@link payout}
  * (floor of winning contracts × 100, favoring the pool). `positions` is any iterable of
  * `[userKey, position]` pairs (a `Map` works); the result has one entry per user, in input
- * order. Throws EngineError (INVALID_STATE) on a duplicate user.
+ * order. Throws EngineError (INVALID_STATE) on a duplicate user or a malformed iterable. Users are
+ * compared by Map key identity, so key by user id strings, never by objects.
  */
 export function settlePayouts<K>(
   positions: Iterable<readonly [K, Position]>,
@@ -129,9 +163,9 @@ export function settlePayouts<K>(
 ): Map<K, number> {
   assertOutcome(outcome);
   const payouts = new Map<K, number>();
-  for (const [user, position] of positions) {
+  for (const [user, position] of readPairs<K>(positions)) {
     assertNewUser(payouts, user);
-    payouts.set(user, payout(position, outcome));
+    payouts.set(user, payout(position as Position, outcome));
   }
   return payouts;
 }
@@ -143,9 +177,9 @@ export function settlePayouts<K>(
  */
 export function voidRefunds<K>(positions: Iterable<readonly [K, Position]>): Map<K, number> {
   const refunds = new Map<K, number>();
-  for (const [user, position] of positions) {
+  for (const [user, position] of readPairs<K>(positions)) {
     assertNewUser(refunds, user);
-    refunds.set(user, voidRefund(position));
+    refunds.set(user, voidRefund(position as Position));
   }
   return refunds;
 }

@@ -306,6 +306,17 @@ Database and server:
 - [ ] A `markets` CHECK tying `outcome` to `status`.
 - [ ] `import "server-only"` in server modules.
 
+Engine use in `placeTrade` (from the engine review on `feat/m2-integrate`):
+- [ ] `withinSlippage` compares `avgPrice`, which measures how far the price moved from the exact cost. The
+  one-point minimum charge on tiny buys is not price movement, so the order ticket shows `costPoints`. For
+  contract-amount orders, `placeTrade` also rejects when the fill's `costPoints` is more than
+  `ceil(maxSlippage × contracts)` above the quoted `costPoints`. Point-budget orders are already capped by
+  `quotePoints`.
+- [ ] `applyFill` does not tie `costPoints` to `contracts`, so `placeTrade` builds every fill from a fresh engine
+  quote, never from client input.
+- [ ] `settlePayouts` and `voidRefunds` find duplicate users by `Map` key identity, so callers key them by user id
+  strings, never by objects.
+
 Later (M5):
 - Per-email wrong-code lockout.
 - Supabase cookie options `httpOnly`, `secure`, `sameSite: "lax"`.

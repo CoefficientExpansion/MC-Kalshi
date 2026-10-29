@@ -135,10 +135,13 @@ export function assertOutcome(value: unknown): asserts value is Outcome {
 }
 
 /**
- * A settlement input: an object with holdings in 0..MAX_CONTRACTS on each side and an integer
- * cost basis within ±MAX_POINTS. Hostile values raise EngineError, never a TypeError.
+ * A settlement input: an object with holdings in 0..MAX_CONTRACTS on the six-decimal grid on
+ * each side and an integer cost basis within ±MAX_POINTS. Each field is read exactly once and the
+ * validated snapshot is returned; callers must use only the snapshot, never `position` again, so
+ * a getter cannot pass validation and then return something else. Hostile values raise
+ * EngineError, never a TypeError.
  */
-export function assertPosition(position: PositionLike): void {
+export function readPosition(position: PositionLike): PositionLike {
   if (typeof position !== "object" || position === null) {
     throw new EngineError("INVALID_STATE", `position must be an object, got ${describe(position)}`);
   }
@@ -150,7 +153,7 @@ export function assertPosition(position: PositionLike): void {
   if (!isHolding(contractsYes) || !isHolding(contractsNo)) {
     throw new EngineError(
       "INVALID_CONTRACTS",
-      `holdings must be finite and within 0..${MAX_CONTRACTS}, got (${describe(contractsYes)}, ${describe(contractsNo)})`,
+      `holdings must be finite, within 0..${MAX_CONTRACTS} and on the six-decimal grid, got (${describe(contractsYes)}, ${describe(contractsNo)})`,
     );
   }
   if (!Number.isInteger(costBasisPoints) || Math.abs(costBasisPoints as number) > MAX_POINTS) {
@@ -159,8 +162,14 @@ export function assertPosition(position: PositionLike): void {
       `cost basis must be an integer number of points within ±${MAX_POINTS}, got ${describe(costBasisPoints)}`,
     );
   }
+  return { contractsYes, contractsNo, costBasisPoints: costBasisPoints as number };
+}
+
+/** {@link readPosition} for callers that only need the check. */
+export function assertPosition(position: PositionLike): void {
+  readPosition(position);
 }
 
 function isHolding(x: unknown): x is number {
-  return typeof x === "number" && Number.isFinite(x) && x >= 0 && x <= MAX_CONTRACTS;
+  return isGridContracts(x) && x >= 0;
 }

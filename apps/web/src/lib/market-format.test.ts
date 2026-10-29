@@ -1,3 +1,4 @@
+import { displayPrice } from "@mc-kalshi/engine";
 import { describe, expect, it } from "vitest";
 import {
   chanceLabel,
@@ -26,6 +27,16 @@ describe("prices", () => {
   it("derives the NO price so the two sum to 100", () => {
     for (const yes of [1, 17, 50, 62, 99]) {
       expect(yes + noPrice(yes)).toBe(100);
+    }
+  });
+
+  it("derives NO from the rounded YES price, never from 1 − p (review: 0.505 would total 101)", () => {
+    // displayPrice(0.505) = 51 and displayPrice(0.495) = 50, so rounding NO separately breaks
+    // the pair; the pages show NO as noPrice(displayPrice(p)).
+    expect(displayPrice(0.505)).toBe(51);
+    expect(noPrice(displayPrice(0.505))).toBe(49);
+    for (const p of [0.005, 0.015, 0.495, 0.505, 0.625, 0.985, 0.995]) {
+      expect(displayPrice(p) + noPrice(displayPrice(p))).toBe(100);
     }
   });
 
