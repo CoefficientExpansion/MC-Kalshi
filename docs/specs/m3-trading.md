@@ -373,3 +373,4 @@ Waves:
 ## Next
 Hand chunks A–D to implementers after task 0; the orchestrator adds the README row. M4 decides positions after
 resolve/void and extends `checkTradingInvariants` accordingly.
+Ticket UI (tasks 5–6) is built as `LiveOrderTicket` in `components/market/order-ticket.tsx`; still to do: replace `OrderTicketPlaceholder` on `/markets/[slug]` (pass `placeTradeAction` as `submit`, the state DTO, account and `now`), then the 390 px / 1280 px screenshots and keyboard and screen-reader pass.
