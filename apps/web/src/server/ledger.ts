@@ -1,3 +1,4 @@
+import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { balances, HOUSE_ACCOUNT_ID, type LedgerEntry, ledgerEntries } from "@/db/schema";
 import type { AnyDb } from "@/db/types";

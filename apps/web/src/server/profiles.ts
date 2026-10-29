@@ -1,3 +1,4 @@
+import "server-only";
 import { eq } from "drizzle-orm";
 import { balances, type Profile, profiles } from "@/db/schema";
 import type { AnyDb } from "@/db/types";
