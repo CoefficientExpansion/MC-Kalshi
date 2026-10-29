@@ -52,9 +52,12 @@ leaderboard, "Also trading" block, realized-vs-unrealized P&L split (needs M4 se
 ## `placeTrade`
 Input: `{ marketId: uuid, side: "YES"|"NO", mode: "buy_points"|"buy_contracts"|"sell_contracts",
 amount: number, expectedAvgPrice: number, maxSlippage?: number (default 2, allowed 0–10),
-idempotencyKey: string (16–64 chars of [A-Za-z0-9_-]; the client sends `crypto.randomUUID()`) }`.
+expectedCostPoints?: number, idempotencyKey: string (16–64 chars of [A-Za-z0-9_-]; the client sends
+`crypto.randomUUID()`) }`.
 `amount` is whole points for `buy_points` (>= 1), else contracts with at most 6 decimals. `expectedAvgPrice`
-is points per contract (0–100), the average price the ticket displayed.
+is points per contract (0–100), the average price the ticket displayed. `expectedCostPoints` is the total cost
+the ticket displayed, a whole number >= 1: required for `buy_contracts` (else `invalid_input`), ignored and
+dropped for the other modes; it is part of `request_fingerprint`.
 
 Order of operations (any failure rolls the whole transaction back and writes nothing):
 0. Pre-transaction: `TRADING_PAUSED=true` -> `trading_paused`. Validate shape -> `invalid_input`. Look up
@@ -76,12 +79,15 @@ Order of operations (any failure rolls the whole transaction back and writes not
       The engine clamps `avgPrice` to 1..99: a sell on a side whose probability is about 1 reports 99 while
       paying about 100 per contract, and `withinSlippage` compares these clamped prices.
    b. `withinSlippage(expectedAvgPrice, quote, maxSlippage)` else `slippage_exceeded` with a fresh `requote`.
+      For `buy_contracts` also `withinCostSlippage(expectedCostPoints, quote.costPoints, maxSlippage,
+      quote.contracts)` (`server/quote.ts`): the fill's `costPoints` may exceed `expectedCostPoints` by at most
+      `ceil(maxSlippage × contracts)`, else `slippage_exceeded` with the same `requote`.
    c. Buy: `balance >= quote.costPoints` else `insufficient_balance {balance, needed}`.
       Sell: held contracts on that side >= amount else `insufficient_position {held}`.
 8. `INSERT INTO trades … ON CONFLICT (user_id, idempotency_key) DO NOTHING RETURNING *`. No row means another
    transaction won the unique constraint (for example the same key sent for two different markets at once):
    roll back, re-read the original, and return it with `replayed: true` only if the full original input matches
-   (market, side, mode, amount, `expectedAvgPrice`, `maxSlippage`; stored as `trades.request_fingerprint`,
+   (market, side, mode, amount, `expectedAvgPrice`, `maxSlippage`, `expectedCostPoints`; stored as `trades.request_fingerprint`,
    see Data touched), else `idempotency_key_reused`. The pre-transaction and step 3 lookups apply the same comparison. A replay never re-validates market status, balance or slippage.
 9. `applyFill(position, quote)`; upsert `positions` (`ON CONFLICT (market_id, user_id) DO UPDATE`).
 10. `UPDATE markets SET q_yes, q_no` from `quote.stateAfter` (absolute values; exact multiples of 1e-6).
@@ -307,12 +313,13 @@ Database and server:
 - [ ] `import "server-only"` in server modules.
 
 Engine use in `placeTrade` (from the engine review on `feat/m2-integrate`):
-- [ ] `withinSlippage` compares `avgPrice`, which measures how far the price moved from the exact cost. The
+- [x] `withinSlippage` compares `avgPrice`, which measures how far the price moved from the exact cost. The
   one-point minimum charge on tiny buys is not price movement, so the order ticket shows `costPoints`. For
-  contract-amount orders, `placeTrade` also rejects when the fill's `costPoints` is more than
-  `ceil(maxSlippage × contracts)` above the quoted `costPoints`. Point-budget orders are already capped by
-  `quotePoints`.
-- [ ] `applyFill` does not tie `costPoints` to `contracts`, so `placeTrade` builds every fill from a fresh engine
+  contract-amount orders the ticket sends the displayed total as `expectedCostPoints` (required for
+  `buy_contracts`), and `placeTrade` also rejects with `slippage_exceeded` when the fill's `costPoints` is more
+  than `ceil(maxSlippage × contracts)` above it (`withinCostSlippage`). Point-budget orders are already capped by
+  `quotePoints`; sells are bounded by `withinSlippage` alone.
+- [x] `applyFill` does not tie `costPoints` to `contracts`, so `placeTrade` builds every fill from a fresh engine
   quote, never from client input.
 - [ ] `settlePayouts` and `voidRefunds` find duplicate users by `Map` key identity, so callers key them by user id
   strings, never by objects.

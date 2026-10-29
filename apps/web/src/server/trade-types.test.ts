@@ -70,7 +70,7 @@ describe("parseTradeInput", () => {
 
   it("accepts each mode and nothing else", () => {
     for (const mode of TRADE_MODES) {
-      expect(parse({ mode, amount: 1 }).ok).toBe(true);
+      expect(parse({ mode, amount: 1, expectedCostPoints: 60 }).ok).toBe(true);
     }
     for (const mode of ["buy", "sell", "sell_points", "", undefined]) {
       expect(parse({ mode })).toEqual(rejected);
@@ -92,15 +92,39 @@ describe("parseTradeInput", () => {
 
   describe.each(["buy_contracts", "sell_contracts"])("amount, %s", (mode) => {
     it.each([0.000001, 0.009, 0.01, 9.761859, 1e6])("accepts %d contracts", (amount) => {
-      expect(parse({ mode, amount }).ok).toBe(true);
+      expect(parse({ mode, amount, expectedCostPoints: 1 }).ok).toBe(true);
     });
 
     it.each([0, -0, -1, 1e-7, 1.0000001, 1e6 + 0.000001, Number.NaN, "1", undefined])(
       "rejects %j",
       (amount) => {
-        expect(parse({ mode, amount })).toEqual(rejected);
+        expect(parse({ mode, amount, expectedCostPoints: 1 })).toEqual(rejected);
       },
     );
+  });
+
+  describe("expectedCostPoints", () => {
+    const contracts = { mode: "buy_contracts", amount: 9.761859 };
+
+    it.each([1, 500, 1e9])("is kept for buy_contracts: %d", (expectedCostPoints) => {
+      expect(parse({ ...contracts, expectedCostPoints })).toEqual({
+        ok: true,
+        input: { ...valid, ...contracts, expectedCostPoints },
+      });
+    });
+
+    it.each([undefined, 0, -1, 0.5, 1e9 + 1, Number.NaN, Number.POSITIVE_INFINITY, "500", null])(
+      "is required for buy_contracts as a whole number >= 1: rejects %j",
+      (expectedCostPoints) => {
+        expect(parse({ ...contracts, expectedCostPoints })).toEqual(rejected);
+      },
+    );
+
+    it.each(["buy_points", "sell_contracts"])("is ignored and dropped for %s", (mode) => {
+      const result = parse({ mode, amount: 1, expectedCostPoints: "garbage" });
+      expect(result).toEqual({ ok: true, input: { ...valid, mode, amount: 1 } });
+      expect(result.ok && "expectedCostPoints" in result.input).toBe(false);
+    });
   });
 
   it.each([0, 0.5, 51, 100])("accepts expectedAvgPrice %d", (expectedAvgPrice) => {
