@@ -135,6 +135,25 @@ describe("ticket labels", () => {
     ]);
   });
 
+  it("adds Left in position to a sell's requote rows when the holding is known", () => {
+    const r = { avgPrice: 47, contracts: -4, costPoints: -188, probAfter: 0.46, payoutIfWin: 0 };
+    const order = { mode: "sell_contracts", side: "YES", amount: 4 } as const;
+    expect(requoteRows(order, r, 10)).toEqual([
+      { label: "Avg price", value: "47 pts" },
+      { label: "You receive", value: "188 pts" },
+      { label: "New price", value: "46%" },
+      { label: "Left in position", value: "6 YES contracts" },
+    ]);
+    expect(requoteRows(order, r, 4)[3]).toEqual({
+      label: "Left in position",
+      value: "0 YES contracts",
+    });
+    expect(requoteRows({ mode: "buy_points", side: "YES", amount: 4 }, r, 10)).toHaveLength(4);
+    expect(requoteRows({ mode: "buy_points", side: "YES", amount: 4 }, r, 10)[3]?.label).toBe(
+      "New price",
+    );
+  });
+
   it("describes a big price move", () => {
     const r = buildTicketQuote({ b: 100, qYes: 0, qNo: 0 }, "buy", "YES", "points", "2000");
     if (!r.ok) throw new Error("unreachable");

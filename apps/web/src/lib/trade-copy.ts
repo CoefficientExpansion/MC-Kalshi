@@ -11,6 +11,7 @@ import type { TicketQuote, TicketQuoteFailure, TicketTab } from "./ticket-quote"
 const pointsFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 const contractsFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 const dustFormat = new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 });
+const MICRO = 1e6;
 
 /** "5,000 pts". */
 export function formatPoints(points: number): string {
@@ -123,19 +124,32 @@ export function quoteRows(q: TicketQuote): QuoteRow[] {
   ];
 }
 
-/** The rows for the server's fresh quote after a slippage reject (the ticket swaps them in). */
+/**
+ * The rows for the server's fresh quote after a slippage reject (the ticket swaps them in). For a
+ * sell, pass the contracts `held` on that side to keep the "Left in position" row.
+ */
 export function requoteRows(
-  order: { readonly mode: TradeMode; readonly side: Side },
+  order: { readonly mode: TradeMode; readonly side: Side; readonly amount?: number },
   r: Requote,
+  held: number | null = null,
 ): QuoteRow[] {
   const yes = displayPrice(r.probAfter);
   const newPrice = { label: "New price", value: `${order.side === "YES" ? yes : 100 - yes}%` };
   if (order.mode === "sell_contracts") {
-    return [
+    const rows: QuoteRow[] = [
       { label: "Avg price", value: `${r.avgPrice} pts` },
       { label: "You receive", value: formatPoints(Math.abs(r.costPoints)) },
       newPrice,
     ];
+    if (held !== null) {
+      const sold = Math.abs(order.amount ?? r.contracts);
+      const left = Math.max(0, Math.round((held - sold) * MICRO) / MICRO);
+      rows.push({
+        label: "Left in position",
+        value: `${formatContracts(left)} ${order.side} ${contractsNoun(left)}`,
+      });
+    }
+    return rows;
   }
   return [
     { label: "Avg price", value: `${r.avgPrice} pts (${r.avgPrice}% to break even)` },

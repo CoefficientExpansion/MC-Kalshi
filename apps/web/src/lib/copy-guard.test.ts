@@ -56,6 +56,7 @@ describe("sourceCopy (the user-visible text of a source file)", () => {
   it("collects string literals, template text and JSX text", () => {
     const src = [
       `const a = "Buy YES";`,
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: fixture source text for the scanner, not a template
       "const b = `You pay ${cost} pts`;",
       `const C = () => <span title="Max amount">Sell {side}</span>;`,
     ].join("\n");
@@ -64,6 +65,7 @@ describe("sourceCopy (the user-visible text of a source file)", () => {
 
   it("finds banned copy in a string literal, a template and an attribute other than className", () => {
     expect(scan(`const a = "Place a wager";`)).toMatch(TICKET_BANNED);
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: fixture source text for the scanner, not a template
     expect(scan("const b = `Win ${n} prizes`;")).toMatch(TICKET_BANNED);
     expect(scan(`const C = () => <b aria-label="Cash out">x</b>;`)).toMatch(TICKET_BANNED);
     expect(scan(`const d = "$5";`)).toMatch(TICKET_BANNED);
@@ -75,7 +77,9 @@ describe("sourceCopy (the user-visible text of a source file)", () => {
       `export { y } from "./prize";`,
       `// a bet in a comment`,
       `/* wager */`,
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: fixture source text for the scanner, not a template
       'const C = () => <div className={`justify-between ${on ? "bet-a" : "bet-b"}`} class="bet">ok</div>;',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: fixture source text for the scanner, not a template
       "const t = `${cash} out`;",
       `const D = () => <i className={cn("prize", x)} />;`,
     ].join("\n");

@@ -1,5 +1,5 @@
 import { getDb } from "@/db";
-import { getCurrentUser } from "@/server/auth";
+import { getSessionMember } from "@/server/auth";
 import { loadMarketState } from "@/server/market-state";
 
 // Polled every 3 s by the market page (docs/specs/m3-trading.md, "Order ticket", Polling).
@@ -18,8 +18,9 @@ export async function GET(
   }
   const { id } = await params;
   try {
-    const member = await getCurrentUser();
-    const state = await loadMarketState(db, id, member?.id ?? null);
+    // getSessionMember, not getCurrentUser: a suspended member still sees their own balance and position.
+    const session = await getSessionMember();
+    const state = await loadMarketState(db, id, session?.userId ?? null);
     if (!state) {
       return Response.json({ code: "not_found" }, { status: 404, headers: NO_STORE });
     }
