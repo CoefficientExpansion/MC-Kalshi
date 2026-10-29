@@ -155,7 +155,7 @@ Pattern adopted from `order-ticket.md` (behavior only), tokens and copy from `do
   error (inline, `role="alert"`, fixed copy per code: "Not enough points: you have 320 and need 500",
   "You only hold 4.2 YES contracts", "Too small: the smallest trade is 0.01 contracts", "Too big: the most you
   can buy at once here is 5,000 pts", "Slow down a little and try again in 12 s", "Trading is paused").
-- Copy lives in `lib/trade-copy.ts`; a test scans it and every ticket string for `bet|wager|prize|cash out|\$|¢`.
+- Copy lives in `lib/trade-copy.ts`; a test scans it and every ticket string for bet, wager, prize, cash out (whole words) and `$`, `¢`. Source files are scanned for user-visible text only (string literals and JSX text; not className values, import paths, template placeholders or comments), so a class such as `justify-between` passes.
 - Accessibility: radiogroup semantics for the toggles, labelled input, quote rows in an `aria-live="polite"` region.
 - Polling: `GET /api/markets/[id]/state` (`no-store`) returns `{status, closeAt, b, qYes, qNo, probabilityYes}` plus, when
   signed in, `{balance, position}`; the page polls every 3 s while visible and stops when the tab is hidden.
