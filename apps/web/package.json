@@ -11,7 +11,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "tsx src/db/seed-cli.ts"
+    "db:seed": "tsx --conditions=react-server src/db/seed-cli.ts"
   },
   "dependencies": {
     "@mc-kalshi/engine": "0.0.0",
@@ -21,7 +21,8 @@
     "next": "16.4.3",
     "postgres": "3.4.9",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "server-only": "0.0.1"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.13",

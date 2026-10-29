@@ -1,3 +1,4 @@
+import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import { cache } from "react";
@@ -11,7 +12,7 @@ import { getSignupBonusPoints, type Member } from "./profiles";
 // Next.js-bound auth: the current member for a request, and the real wiring for `auth-flow.ts`.
 
 /** Adapt Supabase's client to the small interface the sign-in flow is written against. */
-function adaptSupabaseAuth(supabase: SupabaseClient): OtpClient {
+export function adaptSupabaseAuth(supabase: SupabaseClient): OtpClient {
   return {
     async signInWithOtp(args) {
       const { error } = await supabase.auth.signInWithOtp(args);

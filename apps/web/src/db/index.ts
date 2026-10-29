@@ -1,3 +1,4 @@
+import "server-only";
 import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
@@ -36,12 +37,26 @@ export type Db = ReturnType<typeof createClient>;
 
 // `next dev` re-evaluates this module on every hot reload; caching on globalThis stops each
 // reload from opening another pooled connection.
-const store = globalThis as typeof globalThis & { __mcKalshiDb?: Db };
+const store = globalThis as typeof globalThis & { __mcKalshiDb?: Db; __mcKalshiDbRefused?: true };
 
-/** The Drizzle client, or `undefined` when `DATABASE_URL` is not configured. */
+/**
+ * The Drizzle client, or `undefined` when `DATABASE_URL` is not configured. In production
+ * (`VERCEL_ENV=production`) it also refuses to connect when `DATABASE_CA_CERT` is unset or blank,
+ * so the server certificate is always verified there; it logs that once, naming only the variable.
+ */
 export function getDb(): Db | undefined {
   const url = process.env.DATABASE_URL;
   if (!url) {
+    return undefined;
+  }
+  if (
+    process.env.VERCEL_ENV === "production" &&
+    buildSslOption(process.env.DATABASE_CA_CERT) === "require"
+  ) {
+    if (!store.__mcKalshiDbRefused) {
+      store.__mcKalshiDbRefused = true;
+      console.error("[db] refusing to connect: DATABASE_CA_CERT is not set in production");
+    }
     return undefined;
   }
   store.__mcKalshiDb ??= createClient(url);
