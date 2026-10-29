@@ -18,3 +18,9 @@ export function copyViolations(text: string): string[] {
   ];
   return banned.filter(([, re]) => re.test(text)).map(([name]) => name);
 }
+
+/**
+ * The order ticket's stricter pattern (docs/specs/m3-trading.md, "Copy lives in lib/trade-copy.ts"):
+ * a plain substring match, so ticket copy and source avoid any word that contains it.
+ */
+export const TICKET_BANNED = /bet|wager|prize|cash ?out|\$|¢/i;
