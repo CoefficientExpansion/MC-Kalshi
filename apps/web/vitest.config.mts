@@ -16,6 +16,8 @@ export default defineConfig({
     // Each DB test boots its own PGlite (WASM Postgres). With one worker per core the boots
     // contend, and on a 32-core machine they overran the 10 s default hook timeout.
     hookTimeout: 60_000,
-    testTimeout: 30_000,
+    // Some tests boot their PGlite database inside the test; a cold first run (WASM compile,
+    // migrations) can take ~40 s under load, so match the hook timeout.
+    testTimeout: 60_000,
   },
 });

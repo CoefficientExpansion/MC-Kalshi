@@ -113,7 +113,9 @@ describe("checkTradeRateLimit", () => {
 
   it("never asks for less than one second", async () => {
     const { db, marketId } = await fresh();
-    await addTrades(db, marketId, USER, 20, 59.9);
+    // 59 s old, not 59.9: the window is checked against the real clock after the inserts, so a
+    // margin under a second leaves room for a slow machine without the oldest trade ageing out.
+    await addTrades(db, marketId, USER, 20, 59);
     expect(await checkTradeRateLimit(db, USER)).toEqual({ code: "rate_limited", retryAfterSec: 1 });
   });
 });
