@@ -58,6 +58,7 @@ async function addTrades(
       probBefore: 0.5,
       probAfter: 0.5,
       idempotencyKey: `key-${secondsAgo}-${i}-${userId}`,
+      requestFingerprint: "f",
       createdAt: sql`now() - make_interval(secs => ${secondsAgo})`,
     });
   }
@@ -96,6 +97,18 @@ describe("checkTradeRateLimit", () => {
     expect(await checkTradeRateLimit(db, USER)).toBeNull();
     await addTrades(db, marketId, USER, 1, 1);
     expect(await checkTradeRateLimit(db, USER)).toMatchObject({ code: "rate_limited" });
+  });
+
+  it("measures the window on the clock at the call, not at the transaction's start", async () => {
+    const { db, marketId } = await fresh();
+    // Inside one transaction now() stands still: trades 59.5 s before it are 60.5 s old on the
+    // clock once the transaction has slept a second, so they are out of the window.
+    const limited = await db.transaction(async (tx) => {
+      await addTrades(tx, marketId, USER, 20, 59.5);
+      await tx.execute(sql`select pg_sleep(1)`);
+      return checkTradeRateLimit(tx, USER);
+    });
+    expect(limited).toBeNull();
   });
 
   it("never asks for less than one second", async () => {

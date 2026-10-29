@@ -380,6 +380,15 @@ describe("placeTrade: rejections write nothing", () => {
       arrange: async (ctx) => () => trade(ctx, { mode: "buy_contracts", amount: 5 }),
     },
     {
+      // Array.isArray throws on a revoked Proxy: still a value, never an exception.
+      code: "invalid_input",
+      arrange: async (ctx) => () => {
+        const { proxy, revoke } = Proxy.revocable(input(ctx.marketId), {});
+        revoke();
+        return placeTrade(ctx.db, U1, proxy, { tradingPaused: false });
+      },
+    },
+    {
       code: "unauthenticated",
       arrange: async (ctx) => () => trade(ctx, {}, user(99)),
     },
@@ -396,9 +405,24 @@ describe("placeTrade: rejections write nothing", () => {
         trade({ db: ctx.db, marketId: "11111111-1111-4111-8111-111111111111" }),
     },
     {
-      code: "market_not_open",
+      // Moderator-only statuses answer as if the market did not exist, like the state route.
+      code: "market_not_found",
       arrange: async (ctx) => {
         const marketId = await addMarket(ctx.db, ctx.categoryId, { status: "proposed" });
+        return () => trade({ db: ctx.db, marketId });
+      },
+    },
+    {
+      code: "market_not_found",
+      arrange: async (ctx) => {
+        const marketId = await addMarket(ctx.db, ctx.categoryId, { status: "rejected" });
+        return () => trade({ db: ctx.db, marketId });
+      },
+    },
+    {
+      code: "market_not_open",
+      arrange: async (ctx) => {
+        const marketId = await addMarket(ctx.db, ctx.categoryId, { status: "closed" });
         return () => trade({ db: ctx.db, marketId });
       },
     },
@@ -832,5 +856,59 @@ describe("placeTrade: limits and new users", () => {
     const result = ok(await trade(ctx, {}, user(6)));
     expect(result.balance).toBe(0);
     await expectBooked(ctx.db, ctx.marketId, user(6), result);
+  });
+});
+
+describe("placeTrade: lock order and the post-lock clock", () => {
+  it("checks the rate limit inside the transaction, after the balance row is locked", async () => {
+    const ctx = await setup();
+    // A member with no balance row: only inside the transaction, after step 5, does the row exist.
+    await addUser(ctx.db, 7, 0);
+    let rowsSeen = -1;
+    const result = await trade(ctx, {}, user(7), {
+      tradingPaused: false,
+      rateLimit: async (db, userId) => {
+        rowsSeen = (await db.select().from(balances).where(eq(balances.userId, userId))).length;
+        return { code: "rate_limited", retryAfterSec: 5 };
+      },
+    });
+    expect(result).toMatchObject({ ok: false, code: "rate_limited", retryAfterSec: 5 });
+    expect(rowsSeen).toBe(1);
+    // Rolled back: the row placeTrade created is gone again.
+    expect(await balanceOf(ctx.db, user(7))).toBeUndefined();
+  });
+
+  // now() is the transaction's start. Running placeTrade inside an outer transaction that has
+  // already slept makes now() lag the clock, as it would for a trade queued behind a lock.
+  it("rejects a market whose close_at passed after the transaction began", async () => {
+    const ctx = await setup();
+    const result = await ctx.db.transaction(async (tx) => {
+      const marketId = await addMarket(tx, ctx.categoryId, {
+        closeAt: sql`now() + make_interval(secs => 0.2)` as unknown as Date,
+      });
+      await tx.execute(sql`select pg_sleep(0.4)`);
+      return placeTrade(tx, U1, input(marketId), NO_LIMIT);
+    });
+    expect(result).toMatchObject({ ok: false, code: "market_closed" });
+    expect(await tradeCount(ctx.db)).toBe(0);
+  });
+
+  it("stores created_at and the snapshot time from the clock after the locks", async () => {
+    const ctx = await setup();
+    const lag = await ctx.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_sleep(0.3)`);
+      const done = ok(await placeTrade(tx, U1, input(ctx.marketId), NO_LIMIT));
+      const [row] = await tx
+        .select({
+          lag: sql<number>`extract(epoch from (${trades.createdAt} - now()))::float8`,
+          sameAsSnapshot: sql<boolean>`${trades.createdAt} = ${priceSnapshots.at}`,
+        })
+        .from(trades)
+        .innerJoin(priceSnapshots, eq(priceSnapshots.marketId, trades.marketId))
+        .where(eq(trades.id, done.trade.id));
+      expect(row?.sameAsSnapshot).toBe(true);
+      return Number(row?.lag);
+    });
+    expect(lag).toBeGreaterThanOrEqual(0.25);
   });
 });

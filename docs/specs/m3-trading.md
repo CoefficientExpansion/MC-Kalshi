@@ -61,13 +61,24 @@ dropped for the other modes; it is part of `request_fingerprint`.
 
 Order of operations (any failure rolls the whole transaction back and writes nothing):
 0. Pre-transaction: `TRADING_PAUSED=true` -> `trading_paused`. Validate shape -> `invalid_input`. Look up
-   `(user_id, idempotencyKey)`; if found, return the original (step 8 rule). Call the rate-limit seam.
-1. `BEGIN`. Load the profile; missing -> `unauthenticated`; `suspended_at` set -> `account_suspended`.
+   `(user_id, idempotencyKey)`; if found, return the original (step 8 rule). Any throw while reading the
+   input (a revoked Proxy, a throwing getter) is `invalid_input`; each field is read once.
+1. `BEGIN`. Load the profile; missing -> `unauthenticated`; `suspended_at` set -> `account_suspended` (an early
+   answer; step 5b re-checks under the locks).
 2. `SELECT … FROM markets WHERE id = $1 FOR UPDATE`; none -> `market_not_found`.
 3. Re-check idempotency (a concurrent retry may have committed while we waited for the lock).
-4. `status <> 'open'` -> `market_not_open`; `close_at <= now()` -> `market_closed`.
+4. Status `proposed` or `rejected` (not in `PUBLIC_MARKET_STATUSES`) -> `market_not_found`, as the state route
+   answers 404; any other `status <> 'open'` -> `market_not_open`.
 5. `INSERT INTO balances … ON CONFLICT DO NOTHING`, then `SELECT … FROM balances WHERE user_id = $2 FOR UPDATE`.
-   Read the user's `positions` row (absent = `EMPTY_POSITION`).
+   a. With both locks held, re-read the profile `FOR SHARE`: missing -> `unauthenticated`; suspended ->
+      `account_suspended` (a suspension that committed while the trade waited stops it; one that starts now
+      waits for this commit).
+   b. Take the trade's time `T = clock_timestamp()` (not `now()`, which is the transaction's start and may be
+      long before a queued trade got its locks). `close_at <= T` -> `market_closed`. `T` is also
+      `trades.created_at` (set explicitly) and the snapshot's `at`.
+   c. Call the rate-limit seam with the transaction: one user's trades serialize on the balances lock, so each
+      count sees every trade committed before it.
+   d. Read the user's `positions` row (absent = `EMPTY_POSITION`).
 6. Parse `q_yes`/`q_no` with `parseNumeric`, build `MarketState {b, qYes, qNo}`, quote with the engine by mode.
    Any `EngineError` (whatever its `code`: `INVALID_STATE`, `INVALID_CONTRACTS`, `INVALID_POINTS`,
    `INVALID_SIDE`) maps to `invalid_input`; any other exception maps to `internal_error` and is logged.
@@ -122,9 +133,10 @@ meet; no SQL arithmetic on `q` or contracts; points (`bigint` mode number) stay 
 | Maximum amount sanity | contracts <= 1e6, points <= 1e9 | Rejects absurd input before the engine sees it. |
 Constants live in `server/trade-limits.ts` (one place; later movable to `settings`).
 
-**Rate limit.** M3 ships the seam `checkTradeRateLimit(db, userId, now)` and a cheap implementation: count the
-user's trades in the last 60 s (new index `trades(user_id, created_at)`), limit `TRADE_RATE_LIMIT_PER_MIN`
-(default 20) -> `rate_limited`. M5 replaces the body with the shared limiter and adds proposals; the
+**Rate limit.** M3 ships the seam `checkTradeRateLimit(db, userId)` and a cheap implementation: count the
+user's trades in the last 60 s of the database clock (`clock_timestamp()`; new index `trades(user_id, created_at)`),
+limit `TRADE_RATE_LIMIT_PER_MIN` (default 20) -> `rate_limited`. `placeTrade` calls it inside the transaction after
+the balances lock (step 5c), so parallel requests from one user cannot all pass on the same count. M5 replaces the body with the shared limiter and adds proposals; the
 call site and error code do not change.
 
 **Who may trade.** Signed-in, not suspended, market `open` and before `close_at`, balance sufficient for a buy,
@@ -351,7 +363,41 @@ Parallel chunks A–D start after task 0. Each chunk can go to a separate implem
 11. Concurrency suite on the existing CI Postgres service (lock witness, balance race, key race). Verify by: green in CI; skipped with a note locally.
 **E. Integration (last)**
 12. E2E auth via the service role / admin API (fallback: test-session route with `isE2EAuthEnabled` + guard tests), Playwright config, trade-loop spec, CI `e2e` job. Verify by: e2e green in CI; with `VERCEL=1` the test route returns 404.
-13. Adversarial review (doubt-driven) of `placeTrade`; `/security-review`; confirm `docs/architecture.md` §6/§9 (balances lock, idempotency order, balance floor) still match the code; SOP-06 invariant-alert steps. Verify by: findings fixed or recorded here.
+13. [x] Adversarial review (doubt-driven) of `placeTrade` (findings and fixes below). Still open: `/security-review`; confirm `docs/architecture.md` §6/§9 (balances lock, idempotency order, balance floor) still match the code; SOP-06 invariant-alert steps. Verify by: findings fixed or recorded here.
+
+## Adversarial review (task 13)
+
+Doubt-driven review of `placeTrade` on `feat/m3-trading`. Fixed, each with a failing test first:
+1. **Medium: the rate limit raced.** `checkTradeRateLimit` counted committed trades before any lock, so 100
+   parallel requests from one user all passed. It now runs inside the transaction after the balances lock
+   (step 5c); same code and `retryAfterSec`. Tests: PGlite (the seam sees the balance row step 5 created);
+   real Postgres (25 parallel trades from one user, distinct keys: exactly 20 succeed, 5 `rate_limited`).
+2. **Medium: a suspension could miss a queued trade.** Step 1 read `suspended_at` without a lock, before the
+   market-lock wait. Step 5a re-reads the profile `FOR SHARE` after both locks. Test: real Postgres (hold the
+   market lock, start a trade, commit a suspension, release: `account_suspended`, nothing written).
+3. **Medium: `now()` is the transaction's start.** A trade that waited past `close_at` filled, and stored times
+   did not follow lock order. Step 5b takes `clock_timestamp()` after the locks for the `close_at` check,
+   `trades.created_at` (set explicitly) and the snapshot's `at`; the rate-limit window uses `clock_timestamp()`
+   too. Tests: PGlite (inside an outer transaction that has slept, a market that closed after `BEGIN` is
+   `market_closed`, and the stored times lag `now()`; the rate-limit window ignores trades that left it during
+   the transaction); real Postgres (a trade queued behind a held lock past `close_at` is `market_closed`).
+4. **Medium: hostile input threw.** `Array.isArray` ran outside the `try`, so a revoked Proxy threw from both
+   `parseTradeInput` and `placeTrade`. All inspection is inside the `try`; any throw is `invalid_input` with no
+   internal text, and each field is read once. Tests: revoked Proxy, throwing getter, changing getter.
+5. **Low: `internal_error` copy claimed nothing was traded.** A failed `COMMIT` can still have applied. Copy is
+   now "Something went wrong. Check your portfolio before trying again."; the ticket keeps the same key on
+   retry, so a retry after an applied commit is a replay.
+6. **Low: `proposed`/`rejected` markets answered `market_not_open`** while the state route answers 404. They
+   now answer `market_not_found` (`PUBLIC_MARKET_STATUSES`).
+7. **Low: `trades.request_fingerprint` was nullable.** Migration `0006_trades_fingerprint_not_null` sets it
+   `NOT NULL` (no environment has trades yet); a test shows an insert without it fails.
+
+Accepted (Low, not fixed):
+- A replay reports the realized average price (`|cost| / |contracts|`, clamped 1–99), not the engine's, and reads
+  the current position, balance and market state in separate statements, outside one snapshot.
+- `TRADING_PAUSED` is read once at step 0, so trades already in flight when the switch flips still commit.
+- The rate-limit seam takes no `now` parameter: it uses the database clock instead (the spec's earlier
+  `checkTradeRateLimit(db, userId, now)` is superseded).
 
 ## Execution plan (orchestrator, 2026-10-29)
 

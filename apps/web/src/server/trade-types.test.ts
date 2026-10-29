@@ -52,6 +52,46 @@ describe("parseTradeInput", () => {
     expect(parseTradeInput(hostile)).toEqual(rejected);
   });
 
+  it("rejects a revoked Proxy (Array.isArray throws on it) instead of throwing", () => {
+    const { proxy, revoke } = Proxy.revocable({ ...valid }, {});
+    revoke();
+    expect(() => Array.isArray(proxy)).toThrow(TypeError);
+    expect(parseTradeInput(proxy)).toEqual(rejected);
+  });
+
+  it("rejects a Proxy whose getter throws on one field only", () => {
+    const hostile = new Proxy(
+      { ...valid },
+      {
+        get(target, prop, receiver) {
+          if (prop === "idempotencyKey") throw new TypeError("internal detail");
+          return Reflect.get(target, prop, receiver);
+        },
+      },
+    );
+    expect(parseTradeInput(hostile)).toEqual(rejected);
+  });
+
+  it("reads each field once, so a getter that changes between reads cannot slip past", () => {
+    const reads: Record<string, number> = {};
+    let amountReads = 0;
+    const shifty = new Proxy(
+      { ...valid },
+      {
+        get(target, prop, receiver) {
+          if (typeof prop === "string") reads[prop] = (reads[prop] ?? 0) + 1;
+          if (prop === "amount") {
+            amountReads += 1;
+            return amountReads === 1 ? 500 : Number.NaN;
+          }
+          return Reflect.get(target, prop, receiver);
+        },
+      },
+    );
+    expect(parseTradeInput(shifty)).toEqual({ ok: true, input: valid });
+    for (const n of Object.values(reads)) expect(n).toBe(1);
+  });
+
   it.each([
     undefined,
     "",

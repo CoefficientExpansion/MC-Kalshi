@@ -385,6 +385,100 @@ describe.skipIf(!HAS_PG)("real Postgres: concurrent placeTrade", () => {
   );
 
   it(
+    "25 parallel trades from one user with distinct keys: exactly 20 pass the rate limit",
+    async () => {
+      const u = await addUser(20);
+      const marketId = await addMarket();
+      const pool = client(25);
+      const real: PlaceTradeOptions = { tradingPaused: false }; // the real checkTradeRateLimit
+      // Hold the balance row until all 25 are queued (one on it, 24 on the market lock), so every
+      // call is past the pre-transaction replay lookup before any trade commits.
+      const pending = await whileLocked("balances", u, async () => {
+        const all = Promise.all(
+          Array.from({ length: 25 }, (_, i) =>
+            placeTrade(
+              pool.db,
+              u,
+              buy(marketId, key(`rl-${i}`), { amount: 5, expectedAvgPrice: 52 }),
+              real,
+            ),
+          ),
+        );
+        await until(async () => (await lockWaiters(pool.app)) === 25, WAIT_MS, "25 Lock waits");
+        return { all };
+      });
+      const results = await within(pending.all, 20_000, "25 trades after release");
+      const codes = results.map((r) => (r.ok ? "ok" : r.code));
+      expect(codes.filter((c) => c === "ok")).toHaveLength(20);
+      expect(codes.filter((c) => c === "rate_limited")).toHaveLength(5);
+      for (const r of results) {
+        if (!r.ok && r.code === "rate_limited") expect(r.retryAfterSec).toBeGreaterThanOrEqual(1);
+      }
+      expect(await tradesOf(u)).toHaveLength(20);
+      await expectInvariants();
+    },
+    TEST_MS,
+  );
+
+  it(
+    "a suspension that commits while the trade waits on the market lock stops the trade",
+    async () => {
+      const u = await addUser(21);
+      const marketId = await addMarket();
+      const c = client();
+      const result = await whileLocked("markets", marketId, async () => {
+        const pending = placeTrade(c.db, u, buy(marketId, key("suspend")), NO_LIMIT);
+        // Past step 1 (the unlocked profile read) and queued on the market row.
+        await until(async () => (await lockWaiters(c.app)) === 1, WAIT_MS, "a Lock wait");
+        await h.db.update(profiles).set({ suspendedAt: new Date() }).where(eq(profiles.id, u));
+        return { pending };
+      });
+      const done = await within(result.pending, WAIT_MS, "placeTrade after release");
+      expect(done.ok ? "ok" : done.code).toBe("account_suspended");
+      expect(await tradesOf(u)).toHaveLength(0);
+      const [row] = await h.db.select().from(balances).where(eq(balances.userId, u));
+      expect(row?.points).toBe(10_000);
+      await expectInvariants();
+    },
+    TEST_MS,
+  );
+
+  it(
+    "a trade queued behind a held market lock past close_at returns market_closed",
+    async () => {
+      const u = await addUser(22);
+      const marketId = await addMarket();
+      // Close the market 1.5 s from now on the database clock.
+      await h.db
+        .update(markets)
+        .set({ closeAt: sql`clock_timestamp() + make_interval(secs => 1.5)` })
+        .where(eq(markets.id, marketId));
+      const c = client();
+      const result = await whileLocked("markets", marketId, async () => {
+        const pending = placeTrade(c.db, u, buy(marketId, key("late")), NO_LIMIT);
+        // The trade's transaction has begun (now() is before close_at) and waits on the lock.
+        await until(async () => (await lockWaiters(c.app)) === 1, WAIT_MS, "a Lock wait");
+        await until(
+          async () => {
+            const [row] = await h.rows<{ past: boolean }>(
+              sql`select close_at <= clock_timestamp() as past from markets where id = ${marketId}`,
+            );
+            return row?.past === true;
+          },
+          WAIT_MS,
+          "close_at to pass",
+        );
+        return { pending };
+      });
+      const done = await within(result.pending, WAIT_MS, "placeTrade after release");
+      expect(done.ok ? "ok" : done.code).toBe("market_closed");
+      expect(await tradesOf(u)).toHaveLength(0);
+      await expectInvariants();
+    },
+    TEST_MS,
+  );
+
+  it(
     "20 mixed trades from 5 users on 2 markets in parallel settle without deadlock",
     async () => {
       const users: string[] = [];

@@ -225,7 +225,8 @@ export function tradeErrorMessage(
     case "idempotency_key_reused":
       return "This order changed while it was sending. Review it and submit again.";
     case "internal_error":
-      return "Something went wrong on our side. Nothing was traded. Please try again.";
+      // Not "nothing was traded": a failed COMMIT can still have applied. A retry keeps the key.
+      return "Something went wrong. Check your portfolio before trying again.";
   }
 }
 

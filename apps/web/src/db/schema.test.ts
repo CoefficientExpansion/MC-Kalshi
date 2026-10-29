@@ -135,11 +135,22 @@ describe("schema constraints", () => {
       probBefore: 0.5,
       probAfter: 0.52,
       idempotencyKey: "key-1",
+      requestFingerprint: "f",
     };
     await db.insert(trades).values(trade);
     expect(await rejection(db.insert(trades).values(trade))).toContain(
       "trades_user_idempotency_key_uq",
     );
     await db.insert(trades).values({ ...trade, idempotencyKey: "key-2" });
+  });
+
+  it("refuses a trade without a request fingerprint", async () => {
+    const message = await rejection(
+      db.execute(
+        sql`insert into trades (market_id, user_id, side, contracts, cost_points, prob_before, prob_after, idempotency_key)
+            values (${marketId}, ${userId}, 'YES', 1, 50, 0.5, 0.5, 'key-no-fingerprint')`,
+      ),
+    );
+    expect(message).toContain("request_fingerprint");
   });
 });

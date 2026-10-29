@@ -260,6 +260,8 @@ describe("tradeErrorMessage", () => {
     [failure("account_suspended"), "Your account can't trade right now"],
     [failure("market_closed"), "Trading is closed"],
     [failure("market_not_open"), "Trading is closed"],
+    // A failed COMMIT may still have applied, so the copy never claims nothing was traded.
+    [failure("internal_error"), "Something went wrong. Check your portfolio before trying again."],
     [
       failure("slippage_exceeded", {
         requote: { avgPrice: 54, contracts: 9, costPoints: 500, probAfter: 0.55, payoutIfWin: 900 },

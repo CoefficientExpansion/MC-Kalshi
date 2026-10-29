@@ -94,6 +94,7 @@ describe.skipIf(!ADMIN_URL)("real Postgres", () => {
       probBefore: 0.5,
       probAfter: 0.51,
       idempotencyKey: "k",
+      requestFingerprint: "f",
     });
   });
 

@@ -15,6 +15,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { balances, markets, positions, priceSnapshots, profiles, trades } from "@/db/schema";
 import type { AnyDb } from "@/db/types";
 import { postTransfer } from "./ledger";
+import { PUBLIC_MARKET_STATUSES } from "./markets";
 import { formatNumeric, parseNumeric } from "./numeric";
 import { quoteTrade, withinCostSlippage } from "./quote";
 import { checkTradeRateLimit, type RateLimited } from "./rate-limit";
@@ -39,7 +40,10 @@ import {
 export interface PlaceTradeOptions {
   /** Overrides `TRADING_PAUSED === "true"` (tests). */
   readonly tradingPaused?: boolean;
-  /** The rate-limit seam; defaults to {@link checkTradeRateLimit}. */
+  /**
+   * The rate-limit seam, called inside the transaction once the balances row is locked (step
+   * 5c); defaults to {@link checkTradeRateLimit}.
+   */
   readonly rateLimit?: (db: AnyDb, userId: string) => Promise<RateLimited | null>;
 }
 
@@ -67,7 +71,8 @@ const abort = (failure: TradeFailure): never => {
   throw new Abort(failure);
 };
 
-const INTERNAL = fail("internal_error", "the trade could not be completed; nothing was traded");
+// Not "nothing was traded": a COMMIT that fails on the wire may still have applied.
+const INTERNAL = fail("internal_error", "the trade could not be confirmed");
 
 /**
  * Buy or sell contracts for `userId` (already authenticated by the caller). `rawInput` is
@@ -82,24 +87,19 @@ export async function placeTrade(
   // Step 0, before any transaction.
   const paused = opts.tradingPaused ?? process.env.TRADING_PAUSED === "true";
   if (paused) return fail("trading_paused", "trading is paused");
+  // Never throws, even for a revoked Proxy: any throw while reading the input is invalid_input.
   const parsed = parseTradeInput(rawInput);
   if (!parsed.ok) return fail("invalid_input", "the trade request is not valid");
   const input = parsed.input;
+  const rateLimit = opts.rateLimit ?? checkTradeRateLimit;
 
   try {
     const fingerprint = requestFingerprint(input);
     const prior = await findTrade(db, userId, input.idempotencyKey);
     if (prior) return await replay(db, prior, fingerprint);
 
-    const limited = await (opts.rateLimit ?? checkTradeRateLimit)(db, userId);
-    if (limited) {
-      return fail("rate_limited", "too many trades in the last minute", {
-        retryAfterSec: limited.retryAfterSec,
-      });
-    }
-
     try {
-      return await db.transaction((tx) => fillTrade(tx, userId, input, fingerprint));
+      return await db.transaction((tx) => fillTrade(tx, userId, input, fingerprint, rateLimit));
     } catch (e) {
       if (!(e instanceof Abort)) throw e;
       if (e.outcome !== "replay") return e.outcome;
@@ -114,30 +114,27 @@ export async function placeTrade(
   }
 }
 
+const suspended = () => fail("account_suspended", "this account may not trade");
+
 /** Steps 1–12 inside one transaction. Throws {@link Abort} to roll back with a result. */
 async function fillTrade(
   tx: AnyDb,
   userId: string,
   input: ParsedTradeInput,
   fingerprint: string,
+  rateLimit: NonNullable<PlaceTradeOptions["rateLimit"]>,
 ): Promise<TradeSuccess> {
-  // 1. The member.
+  // 1. The member (an early answer; re-checked under the locks in step 5a).
   const [profile] = await tx
     .select({ suspendedAt: profiles.suspendedAt })
     .from(profiles)
     .where(eq(profiles.id, userId));
   if (!profile) abort(fail("unauthenticated", "no member for this session"));
-  if (profile?.suspendedAt) abort(fail("account_suspended", "this account may not trade"));
+  if (profile?.suspendedAt) abort(suspended());
 
-  // 2. Lock the market. Time is the database's.
+  // 2. Lock the market.
   const [market] = await tx
-    .select({
-      b: markets.b,
-      qYes: markets.qYes,
-      qNo: markets.qNo,
-      status: markets.status,
-      pastClose: sql<boolean>`${markets.closeAt} <= now()`,
-    })
+    .select({ b: markets.b, qYes: markets.qYes, qNo: markets.qNo, status: markets.status })
     .from(markets)
     .where(eq(markets.id, input.marketId))
     .for("update");
@@ -146,11 +143,13 @@ async function fillTrade(
   // 3. A concurrent retry may have committed while we waited for the lock.
   if (await findTrade(tx, userId, input.idempotencyKey)) throw new Abort("replay");
 
-  // 4. Open and before close_at.
+  // 4. Public and open. Moderator-only statuses answer as missing, like the state route.
+  if (!PUBLIC_MARKET_STATUSES.includes(market.status)) {
+    abort(fail("market_not_found", "no such market"));
+  }
   if (market.status !== "open") abort(fail("market_not_open", "this market is not open"));
-  if (market.pastClose) abort(fail("market_closed", "this market has closed"));
 
-  // 5. Lock the balance (creating the row for a member who has none), read the position.
+  // 5. Lock the balance (creating the row for a member who has none).
   await tx.insert(balances).values({ userId, points: 0 }).onConflictDoNothing();
   const [balanceRow] = await tx
     .select({ points: balances.points })
@@ -158,6 +157,43 @@ async function fillTrade(
     .where(eq(balances.userId, userId))
     .for("update");
   const balance = balanceRow?.points ?? 0;
+
+  // 5a. Both locks held: re-read the member FOR SHARE, so a suspension that committed while we
+  // waited stops the trade and one that starts now waits for our commit.
+  const [current] = await tx
+    .select({ suspendedAt: profiles.suspendedAt })
+    .from(profiles)
+    .where(eq(profiles.id, userId))
+    .for("share");
+  if (!current) abort(fail("unauthenticated", "no member for this session"));
+  if (current?.suspendedAt) abort(suspended());
+
+  // 5b. The trade's time: the clock after the locks (now() is the transaction's start, which may
+  // be long before a queued trade got its locks). close_at, created_at and the snapshot use it.
+  const [clock] = await tx
+    .select({ at: sql<string>`clock_timestamp()::text` })
+    .from(markets)
+    .where(eq(markets.id, input.marketId));
+  if (!clock) throw new Error("locked market row vanished");
+  const at = sql`${clock.at}::timestamptz`;
+  const [closed] = await tx
+    .select({ past: sql<boolean>`${markets.closeAt} <= ${at}` })
+    .from(markets)
+    .where(eq(markets.id, input.marketId));
+  if (closed?.past) abort(fail("market_closed", "this market has closed"));
+
+  // 5c. The rate limit, under the balances lock: one user's trades serialize here, so each
+  // count sees every trade that committed before it.
+  const limited = await rateLimit(tx, userId);
+  if (limited) {
+    abort(
+      fail("rate_limited", "too many trades in the last minute", {
+        retryAfterSec: limited.retryAfterSec,
+      }),
+    );
+  }
+
+  // 5d. The position.
   const position = await readPosition(tx, input.marketId, userId);
 
   // 6. Quote from the locked state.
@@ -214,6 +250,7 @@ async function fillTrade(
       probAfter: quote.probAfter,
       idempotencyKey: input.idempotencyKey,
       requestFingerprint: fingerprint,
+      createdAt: at,
     })
     .onConflictDoNothing({ target: [trades.userId, trades.idempotencyKey] })
     .returning();
@@ -254,10 +291,10 @@ async function fillTrade(
     });
   }
 
-  // 12. The chart point, at the trade's time (now() is fixed for the transaction).
+  // 12. The chart point, at the trade's time (5b).
   await tx
     .insert(priceSnapshots)
-    .values({ marketId: input.marketId, at: sql`now()`, probabilityYes: quote.probAfter });
+    .values({ marketId: input.marketId, at, probabilityYes: quote.probAfter });
 
   return {
     ok: true,
