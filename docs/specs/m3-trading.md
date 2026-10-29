@@ -257,7 +257,7 @@ in the app bundle. **Fallback only if that proves impractical:** a test-only rou
 email) that creates the profile with `grantSignupBonus` and sets an HMAC-signed `e2e-session` cookie;
 `getCurrentUser()` accepts that cookie only when `isE2EAuthEnabled()` is true. **Guard (one function, unit-tested,
 including a case with `VERCEL=1`):** `E2E_AUTH_BYPASS === "1"` AND `E2E_AUTH_SECRET`
-is set AND `process.env.VERCEL` is unset. `NODE_ENV` is not usable because `next start` forces `production`; Vercel
+is set AND `process.env.GITHUB_ACTIONS === "true"` (added after the security review) AND `process.env.VERCEL` is unset. `NODE_ENV` is not usable because `next start` forces `production`; Vercel
 always sets `VERCEL`, so the bypass cannot run on production or previews even if the flag leaks there. The route returns
 404 when the guard is false. Tests:
 - Trade loop: sign in -> open a seeded market -> type 500 points on YES -> quote shows -> submit -> success text, balance

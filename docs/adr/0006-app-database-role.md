@@ -13,15 +13,18 @@ blast radius of the app's database identity has to shrink before it ships.
 1. Migration `0005_app_role` creates a `NOLOGIN` role `mc_app` (not superuser, no `BYPASSRLS`,
    `CREATEDB` or `CREATEROLE`, owns nothing) with only what `src/server/*.ts` needs:
    `SELECT, INSERT` on `ledger_entries`, `trades`, `price_snapshots`; `SELECT, INSERT, UPDATE` on
-   `balances`, `positions`, `markets`, `profiles`; `SELECT` on `categories`; `USAGE` on schema
+   `balances`, `positions`, `markets`, `profiles` (narrowed by `0007`: on `profiles` only
+   `display_name` and `leaderboard_opt_out`); `SELECT` on `categories`; `USAGE` on schema
    `public` and on `ledger_entries_id_seq`. No `DELETE`, `TRUNCATE` or DDL anywhere and no grant
    on `settings`, `disputes` or `audit_log` until code reads them.
 2. RLS stays on and deny-all for everyone else. Because `mc_app` does not bypass RLS, each grant
    gets a matching permissive policy `TO mc_app` (`mc_app_select`, `mc_app_insert`,
    `mc_app_update`); `anon` and `authenticated` still match no policy, and migration
    `0003_hardening` revokes all their grants and default privileges in `public` as well.
-3. Migrations, `db:studio` and `db:seed` keep running as the owner. `drizzle.config.ts` reads
-   `MIGRATION_DATABASE_URL` when set, else `DATABASE_URL`.
+3. Migrations, `db:studio` and `db:seed` keep running as the owner. `drizzle.config.ts` and
+   `db:seed` read `MIGRATION_DATABASE_URL`, else `DATABASE_URL`, else `POSTGRES_URL_NON_POOLING`,
+   else `POSTGRES_URL` (`src/db/url.ts`); the app at runtime reads `DATABASE_URL`, else
+   `POSTGRES_URL`.
 4. Owner step, per Supabase project (`dev`, then `prod`; tracked in `docs/owner-todos.md`): in the
    SQL editor run `ALTER ROLE mc_app WITH LOGIN PASSWORD '…'`, then point `DATABASE_URL` (Vercel
    and `.env.local`) at `mc_app` (pooler user `mc_app.<project-ref>`) and keep the owner string in
@@ -31,8 +34,21 @@ blast radius of the app's database identity has to shrink before it ships.
 - Privilege checks run before triggers, so as `mc_app` an `UPDATE`, `DELETE` or `TRUNCATE` of
   `ledger_entries` or `trades` fails with `42501`, and `DISABLE TRIGGER` fails because `mc_app`
   is not the owner. Tests: `src/db/privileges.test.ts` (PGlite and the CI Postgres job).
-- Until the owner step is done nothing changes at runtime: the app still connects as the owner.
-  The role and grants exist from the migration on, so the switch is a configuration change only.
+- Outside Production, until the owner step is done nothing changes at runtime: the app still
+  connects as the owner. The role and grants exist from the migration on, so the switch is a
+  configuration change only.
+- **Production fails closed on the owner role.** With `VERCEL_ENV=production`, `getDbChecked()`
+  (`src/db/index.ts`) runs `select current_user` on the instance's first connection and, unless
+  it returns `mc_app` (`APP_DB_ROLE`), refuses the connection for the life of the instance: it
+  and `getDb()` return `undefined`, one `[db] refusing to connect` line is logged (no secrets),
+  pages show "not set up", `/api/health` reports `db: "error"`. Every request path (the trade
+  action, sign-in and the session lookup, the market and portfolio pages, the market-state,
+  cron and health routes) goes through it. A check that fails (database down) is retried by the
+  next request. So the owner step is a blocking release step (SOP-05), not an optional hardening.
+- Migration `0007_privilege_tightening` narrows `profiles` UPDATE to `display_name` and
+  `leaderboard_opt_out`, so app code cannot change `role` or `suspended_at` (admin actions in M4
+  need their own path), and stops new functions the migrating role creates from being executable
+  by `PUBLIC` by default.
 - Every future table needs its grant and `mc_app` policies in the migration that creates it, or
   the app gets `42501` (fail closed). New server code that reads `settings`, `disputes` or
   `audit_log` (M4 admin work) needs a migration adding those grants.

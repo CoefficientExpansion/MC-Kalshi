@@ -25,8 +25,9 @@ and delete a line once it is done. Last updated 2026-10-29 (after the engine dec
 
 ## Supabase `dev`
 - [ ] Copy the `dev` connection string and append `?sslmode=require`:
-  - [ ] Vercel -> Project -> Settings -> Environment Variables -> `DATABASE_URL`, Preview and
-    Production. Use the pooled "Transaction" string (port 6543).
+  - [ ] Vercel -> Project -> Settings -> Environment Variables -> `DATABASE_URL`, Preview only.
+    Use the pooled "Transaction" string (port 6543). Production gets the `prod` `mc_app` string
+    only (see Supabase `prod`, blocking step).
   - [ ] `apps/web/.env.local` on your machine.
 - [ ] Supabase -> Project Settings -> API: put `NEXT_PUBLIC_SUPABASE_URL` and
   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` also works) in
@@ -39,7 +40,7 @@ and delete a line once it is done. Last updated 2026-10-29 (after the engine dec
 - [ ] **App database role** (ADR-0006, after migration `0005_app_role`): Supabase -> SQL Editor, run
   `ALTER ROLE mc_app WITH LOGIN PASSWORD '<a new generated password>';` (never paste it into chat).
   Then copy your current owner string into `MIGRATION_DATABASE_URL` in `apps/web/.env.local`, and
-  point `DATABASE_URL` (Vercel Preview + Production and `.env.local`) at `mc_app`: same host, user
+  point `DATABASE_URL` (Vercel Preview and `.env.local`) at `mc_app`: same host, user
   `mc_app.<project-ref>` on the pooler, the new password, `?sslmode=require`. Check `/api/health`
   still reports `db: "ok"` and a new sign-in still gets its points. Run `npm run db:seed` with
   `DATABASE_URL` set to the owner string (`mc_app` may not insert categories). Until this step is
@@ -59,12 +60,21 @@ and delete a line once it is done. Last updated 2026-10-29 (after the engine dec
   appear) and once with a gmail address (must be refused).
 
 ## Supabase `prod`
-- [ ] `DATABASE_URL` (pooled), the three `NEXT_PUBLIC_SUPABASE_*` values and `DATABASE_CA_CERT` in
-  Vercel -> Production only.
-- [ ] Run `npm run db:migrate` against `prod` at the first release (SOP-05).
-- [ ] **App database role on `prod`**, same steps as `dev` with a different password:
-  `ALTER ROLE mc_app WITH LOGIN PASSWORD '...'` in the SQL Editor, Production `DATABASE_URL` ->
-  `mc_app`, and the owner string only where you run migrations (`MIGRATION_DATABASE_URL`, never Vercel).
+- [ ] Run `npm run db:migrate` against `prod` from your machine, with the `prod` owner string in
+  `MIGRATION_DATABASE_URL` (in `.env.local`, never in Vercel), at the first release (SOP-05).
+- [ ] **BLOCKING, before Production gets any database URL: Production `DATABASE_URL` uses the
+  `mc_app` role (never the `postgres` owner string).** ADR-0006; SOP-05 "Blocking, before
+  Production gets any database URL". After the migrate above:
+  1. Supabase `prod` -> SQL Editor: `ALTER ROLE mc_app WITH LOGIN PASSWORD '<a new generated
+     password>';` (a different password from `dev`; never paste it into chat).
+  2. Build the pooled "Transaction" connection string (port 6543) with user `mc_app.<project-ref>`,
+     the new password and `?sslmode=require`.
+  3. Vercel -> Production: put that string in `DATABASE_URL`. Do not rely on the Supabase
+     integration's `POSTGRES_URL` (it logs in as the owner).
+  The app enforces it: in Production it checks `select current_user` on its first connection and
+  refuses any role but `mc_app` (`/api/health` then reports `db: "error"`).
+- [ ] Then the three `NEXT_PUBLIC_SUPABASE_*` values and `DATABASE_CA_CERT` in Vercel ->
+  Production only (`DATABASE_CA_CERT` is required there: without it the app refuses the database).
 - [ ] **Enable the before-user-created hook on `prod` too**, same steps as `dev`.
 - [ ] Do not set the Supabase env vars in Production until this hook is enabled on `prod`. At the same
   time set the email code expiry to 10 minutes or less (Authentication -> Providers -> Email).
@@ -92,7 +102,8 @@ and delete a line once it is done. Last updated 2026-10-29 (after the engine dec
 
 ## Before beta
 - [ ] Public product name and favicon (Decisions).
-- [ ] Custom SMTP live on `prod`; hook enabled on `prod`; `DATABASE_CA_CERT` set in Production.
+- [ ] Custom SMTP live on `prod`; hook enabled on `prod`; `DATABASE_CA_CERT` set in Production;
+  Production `DATABASE_URL` logs in as `mc_app`.
 - [x] Students can reach production (Deployment Protection covers previews only; verified 2026-10-29).
 - [ ] Market-page sign-in decision applied.
 - [ ] Architecture §11 answered (compliance sign-off first), two moderators named.
