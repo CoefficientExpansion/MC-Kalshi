@@ -18,6 +18,7 @@ describe("AccountControl", () => {
     expect(html).toMatch(/href="\/sign-in"/);
     expect(html).toMatch(/Sign in/);
     expect(html).not.toMatch(/Sign out/);
+    expect(html).not.toMatch(/Portfolio/);
   });
 
   it("shows the display name, points and a sign-out form when signed in", async () => {
@@ -33,6 +34,7 @@ describe("AccountControl", () => {
     expect(html).toMatch(/10,000 pts/);
     expect(html).toMatch(/<form action="\/auth\/sign-out" method="post"/);
     expect(html).toMatch(/Sign out/);
+    expect(html).toMatch(/<a[^>]*href="\/portfolio"[^>]*>Portfolio<\/a>/);
     // The email is not shown in the header (SOP-09).
     expect(html).not.toMatch(/maryvillecollege\.edu/);
     expect(html.replace(/<[^>]+>/g, " ")).not.toMatch(/\bbets?\b|\$|cash[\s-]?out/i);
