@@ -26,11 +26,19 @@ export interface TradeInput {
   readonly expectedAvgPrice: number;
   /** Points per contract, 0–10; default 2. */
   readonly maxSlippage?: number;
+  /**
+   * The total cost the ticket displayed, whole points >= 1. Required for `buy_contracts` (the
+   * fill may cost at most ceil(maxSlippage × contracts) more); ignored and dropped otherwise.
+   */
+  readonly expectedCostPoints?: number;
   /** 16–64 chars of [A-Za-z0-9_-]; the client sends `crypto.randomUUID()`. */
   readonly idempotencyKey: string;
 }
 
-/** A validated input: `marketId` lowercased, `maxSlippage` defaulted, unknown fields dropped. */
+/**
+ * A validated input: `marketId` lowercased, `maxSlippage` defaulted, unknown fields dropped
+ * (`expectedCostPoints` is present only for `buy_contracts`).
+ */
 export type ParsedTradeInput = TradeInput & { readonly maxSlippage: number };
 
 export type ParseTradeInputResult =
@@ -79,11 +87,13 @@ export function parseTradeInput(raw: unknown): ParseTradeInputResult {
       expectedAvgPrice: r.expectedAvgPrice,
       maxSlippage: r.maxSlippage,
       idempotencyKey: r.idempotencyKey,
+      expectedCostPoints: r.expectedCostPoints,
     };
   } catch {
     return INVALID;
   }
-  const { marketId, side, mode, amount, expectedAvgPrice, idempotencyKey } = fields;
+  const { marketId, side, mode, amount, expectedAvgPrice, idempotencyKey, expectedCostPoints } =
+    fields;
   const maxSlippage = fields.maxSlippage === undefined ? DEFAULT_MAX_SLIPPAGE : fields.maxSlippage;
   if (
     typeof marketId !== "string" ||
@@ -102,18 +112,25 @@ export function parseTradeInput(raw: unknown): ParseTradeInputResult {
   ) {
     return INVALID;
   }
-  return {
-    ok: true,
-    input: {
-      marketId: marketId.toLowerCase(),
-      side,
-      mode,
-      amount,
-      expectedAvgPrice,
-      maxSlippage,
-      idempotencyKey,
-    },
+  const input: ParsedTradeInput = {
+    marketId: marketId.toLowerCase(),
+    side,
+    mode,
+    amount,
+    expectedAvgPrice,
+    maxSlippage,
+    idempotencyKey,
   };
+  if (mode !== "buy_contracts") return { ok: true, input };
+  if (
+    !isFiniteNumber(expectedCostPoints) ||
+    !Number.isInteger(expectedCostPoints) ||
+    expectedCostPoints < 1 ||
+    expectedCostPoints > MAX_INPUT_POINTS
+  ) {
+    return INVALID;
+  }
+  return { ok: true, input: { ...input, expectedCostPoints } };
 }
 
 /** Every expected failure code (spec "Error taxonomy"). The UI maps each to fixed copy. */
@@ -212,6 +229,8 @@ export interface MarketStateDto {
   readonly qYes: number;
   readonly qNo: number;
   readonly probabilityYes: number;
+  /** Whole-percent YES price, 1–99 (engine `displayPrice`). */
+  readonly displayPrice: number;
   readonly balance?: number;
   readonly position?: Position;
 }

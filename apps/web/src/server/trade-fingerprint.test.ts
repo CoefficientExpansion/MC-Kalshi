@@ -45,8 +45,16 @@ describe("requestFingerprint", () => {
     ["amount", { amount: 501 }],
     ["expectedAvgPrice", { expectedAvgPrice: 52 }],
     ["maxSlippage", { maxSlippage: 5 }],
+    ["expectedCostPoints", { expectedCostPoints: 500 }],
   ])("changes when %s changes", (_, patch) => {
     expect(requestFingerprint({ ...base, ...patch })).not.toBe(requestFingerprint(base));
+  });
+
+  it("tells a different expectedCostPoints apart", () => {
+    const contracts: ParsedTradeInput = { ...base, mode: "buy_contracts", amount: 9.761859 };
+    expect(requestFingerprint({ ...contracts, expectedCostPoints: 500 })).not.toBe(
+      requestFingerprint({ ...contracts, expectedCostPoints: 501 }),
+    );
   });
 
   it("treats -0 and 0 alike", () => {

@@ -1,0 +1,85 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { MarketStateDto } from "@/server/trade-types";
+import { dynamic, GET } from "./route";
+
+const mocks = vi.hoisted(() => ({
+  db: undefined as unknown,
+  user: null as { id: string } | null,
+  state: null as unknown,
+  load: vi.fn(),
+}));
+vi.mock("@/db", () => ({ getDb: () => mocks.db }));
+vi.mock("@/server/auth", () => ({ getCurrentUser: async () => mocks.user }));
+vi.mock("@/server/market-state", () => ({ loadMarketState: mocks.load }));
+
+const ID = "3f2b8c1e-9d4a-4b6e-8f10-2a3b4c5d6e7f";
+const STATE: MarketStateDto = {
+  status: "open",
+  closeAt: "2030-01-01T12:00:00.000Z",
+  b: 100,
+  qYes: 0,
+  qNo: 0,
+  probabilityYes: 0.5,
+  displayPrice: 50,
+};
+
+const call = (id = ID) =>
+  GET(new Request(`http://localhost/api/markets/${id}/state`), {
+    params: Promise.resolve({ id }),
+  });
+
+beforeEach(() => {
+  mocks.db = { fake: true };
+  mocks.user = null;
+  mocks.load.mockReset();
+  mocks.load.mockResolvedValue(STATE);
+});
+
+describe("GET /api/markets/[id]/state", () => {
+  it("is dynamic", () => {
+    expect(dynamic).toBe("force-dynamic");
+  });
+
+  it("returns the public state with no-store for a signed-out visitor", async () => {
+    const res = await call();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual(STATE);
+    expect(mocks.load).toHaveBeenCalledWith(mocks.db, ID, null);
+  });
+
+  it("passes the signed-in member's id", async () => {
+    mocks.user = { id: "00000000-0000-4000-8000-000000000001" };
+    mocks.load.mockResolvedValue({ ...STATE, balance: 10, position: undefined });
+    const res = await call();
+    expect(res.status).toBe(200);
+    expect(mocks.load).toHaveBeenCalledWith(mocks.db, ID, mocks.user.id);
+  });
+
+  it("is 404 for an unknown or hidden market", async () => {
+    mocks.load.mockResolvedValue(null);
+    const res = await call();
+    expect(res.status).toBe(404);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({ code: "not_found" });
+  });
+
+  it("is 503 when there is no database", async () => {
+    mocks.db = undefined;
+    const res = await call();
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ code: "unconfigured" });
+    expect(mocks.load).not.toHaveBeenCalled();
+  });
+
+  it("is a generic 500 when the lookup fails", async () => {
+    mocks.load.mockRejectedValue(new Error("connect ECONNREFUSED postgres://secret@host"));
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await call();
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(body).not.toMatch(/secret|ECONNREFUSED/);
+    expect(String(log.mock.calls[0]?.[0])).not.toMatch(/secret/);
+    log.mockRestore();
+  });
+});
