@@ -1,6 +1,6 @@
 import type { AnyDb } from "@/db/types";
 import { isAllowedEmail, normalizeEmail } from "./auth-email";
-import { ensureProfile, ProfileError } from "./profiles";
+import { ensureProfile, loadMember, type Member, ProfileError } from "./profiles";
 
 // The sign-in steps, free of Next.js and of the Supabase SDK so they run against fakes in tests.
 // `auth.ts` wires them to the real client, cookies and database.
@@ -184,4 +184,37 @@ export async function signOutOf(client: OtpClient | undefined): Promise<void> {
   } catch (e) {
     logFailure("sign out", e instanceof Error ? e : { code: "unknown" });
   }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * The member a verified session belongs to, or `null`. Runs on every request, so a session that
+ * outlives its sign-in checks stops working: the email in the token must still be an allowed
+ * address (a member can change it through Supabase's `updateUser`, which the sign-up hook does
+ * not see) and must still be the one on the profile. Never throws on bad claims; logs no address.
+ */
+export async function memberForClaims(
+  db: AnyDb,
+  claims: { readonly sub?: unknown; readonly email?: unknown } | undefined,
+  domains: readonly string[],
+): Promise<Member | null> {
+  const sub = claims?.sub;
+  if (typeof sub !== "string" || !UUID.test(sub)) {
+    return null;
+  }
+  const email = claims?.email;
+  if (typeof email !== "string" || !isAllowedEmail(email, domains)) {
+    console.error("[auth] session refused: email claim is missing or not allowed");
+    return null;
+  }
+  const member = await loadMember(db, sub);
+  if (!member) {
+    return null;
+  }
+  if (normalizeEmail(email) !== normalizeEmail(member.email)) {
+    console.error("[auth] session refused: email claim differs from the profile");
+    return null;
+  }
+  return member;
 }

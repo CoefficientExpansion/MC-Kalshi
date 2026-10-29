@@ -5,12 +5,10 @@ import { getDb } from "@/db";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAllowedDomains } from "./auth-email";
-import { type AuthDeps, type OtpClient, signOutOf } from "./auth-flow";
-import { getSignupBonusPoints, loadMember, type Member } from "./profiles";
+import { type AuthDeps, memberForClaims, type OtpClient, signOutOf } from "./auth-flow";
+import { getSignupBonusPoints, type Member } from "./profiles";
 
 // Next.js-bound auth: the current member for a request, and the real wiring for `auth-flow.ts`.
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** Adapt Supabase's client to the small interface the sign-in flow is written against. */
 function adaptSupabaseAuth(supabase: SupabaseClient): OtpClient {
@@ -51,7 +49,8 @@ export function isSignInConfigured(): boolean {
 
 /**
  * The signed-in member (profile plus points balance) for this request, or `null` when signed out,
- * suspended, unconfigured, or if the lookup fails. Never throws: the header calls it on every page.
+ * suspended, unconfigured, if the lookup fails, or if the session's email is no longer an allowed
+ * address or no longer the profile's (see `memberForClaims`). Never throws: the header calls it on every page.
  * The session is verified with `getClaims()` (signature checked), never read raw from the cookie.
  * Cached per request. With Supabase unset it does not touch cookies, so pages stay static.
  */
@@ -63,11 +62,7 @@ export const getCurrentUser = cache(async (): Promise<Member | null> => {
   try {
     const supabase = await createSupabaseServerClient();
     const { data } = (await supabase?.auth.getClaims()) ?? {};
-    const sub = data?.claims.sub;
-    if (typeof sub !== "string" || !UUID.test(sub)) {
-      return null;
-    }
-    return await loadMember(db, sub);
+    return await memberForClaims(db, data?.claims, getAllowedDomains());
   } catch (e) {
     console.error(`[auth] current user lookup failed: ${e instanceof Error ? e.name : "unknown"}`);
     return null;
