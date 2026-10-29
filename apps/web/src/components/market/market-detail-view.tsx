@@ -7,10 +7,15 @@ import {
   pointsLabel,
   statusBadge,
 } from "@/lib/market-format";
+import type { PriceHistory } from "@/lib/price-range";
 import type { DetailLoad } from "@/server/market-pages";
 import type { MarketView } from "@/server/markets";
+import type { MarketStateDto } from "@/server/trade-types";
+import { MarketTradePanel } from "./market-trade-panel";
 import { Notice } from "./notice";
-import { OrderTicketPlaceholder } from "./order-ticket-placeholder";
+import type { OrderTicketProps, TicketAccount } from "./order-ticket";
+import { PositionCard } from "./position-card";
+import { PriceChart } from "./price-chart";
 import { StatusBadge } from "./status-badge";
 
 const SHELL = "mx-auto flex w-full max-w-5xl flex-col gap-6 px-6 py-8 sm:px-8";
@@ -30,7 +35,26 @@ function DateRow({ label, date, now }: { label: string; date: Date; now: Date })
   );
 }
 
-function Detail({ market, now }: { market: MarketView; now: Date }) {
+/** What the page passes for the ticket, chart and position card. */
+export interface MarketTrading {
+  readonly state: MarketStateDto;
+  readonly history: PriceHistory | null;
+  /** The signed-in member's balance and position here (suspended or not); null when signed out. */
+  readonly account: TicketAccount | null;
+  readonly suspended: boolean;
+  /** placeTradeAction. */
+  readonly submit: OrderTicketProps["submit"];
+}
+
+function Detail({
+  market,
+  now,
+  trading,
+}: {
+  market: MarketView;
+  now: Date;
+  trading: MarketTrading;
+}) {
   const badge = statusBadge(market, now);
   const tradable = market.status === "open" && market.closeAt.getTime() > now.getTime();
   return (
@@ -57,8 +81,10 @@ function Detail({ market, now }: { market: MarketView; now: Date }) {
         </ol>
       </nav>
 
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-        <article className="flex flex-col gap-8">
+      {/* Mobile order: headline, chart, YES/NO buttons, then the rest; from 1024 px the ticket
+          is a sticky right column beside both blocks. */}
+      <article className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:grid-rows-[auto_1fr] lg:items-start">
+        <div className="flex flex-col gap-8 lg:col-start-1 lg:row-start-1">
           <header className="flex flex-col gap-3">
             <div className="flex flex-wrap items-center gap-3">
               <p className="font-display text-sm font-semibold uppercase tracking-widest text-brand-ink">
@@ -77,6 +103,29 @@ function Detail({ market, now }: { market: MarketView; now: Date }) {
             </p>
           </header>
 
+          {trading.history ? (
+            <PriceChart history={trading.history} basePath={`/markets/${market.slug}`} />
+          ) : null}
+        </div>
+
+        <aside
+          aria-label="Order ticket"
+          className="flex flex-col gap-4 lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1"
+        >
+          <MarketTradePanel
+            marketId={market.id}
+            market={trading.state}
+            account={trading.account}
+            suspended={trading.suspended}
+            submit={trading.submit}
+            now={now.getTime()}
+          />
+          {trading.account ? (
+            <PositionCard position={trading.account.position} yesPrice={market.displayPrice} />
+          ) : null}
+        </aside>
+
+        <div className="flex flex-col gap-8 lg:col-start-1 lg:row-start-2">
           <section aria-labelledby="prices-heading" className="flex flex-col gap-3">
             <h2 id="prices-heading" className={H2}>
               Prices
@@ -136,12 +185,8 @@ function Detail({ market, now }: { market: MarketView; now: Date }) {
               ) : null}
             </dl>
           </section>
-        </article>
-
-        <aside aria-label="Order ticket" className="lg:sticky lg:top-6">
-          <OrderTicketPlaceholder yesPrice={market.displayPrice} tradable={tradable} />
-        </aside>
-      </div>
+        </div>
+      </article>
     </div>
   );
 }
@@ -150,11 +195,17 @@ function Detail({ market, now }: { market: MarketView; now: Date }) {
 export function MarketDetailView({
   load,
   now,
+  trading,
 }: {
   load: Exclude<DetailLoad, { kind: "not-found" }>;
   now: Date;
+  /** Required to render the ticket, chart and position card of an `ok` load. */
+  trading?: MarketTrading;
 }) {
-  if (load.kind === "ok") return <Detail market={load.market} now={now} />;
+  if (load.kind === "ok") {
+    if (!trading) throw new Error("MarketDetailView: an ok load needs trading data");
+    return <Detail market={load.market} now={now} trading={trading} />;
+  }
   return (
     <div className={SHELL}>
       {load.kind === "unconfigured" ? (
