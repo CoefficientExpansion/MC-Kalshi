@@ -9,6 +9,11 @@ dist/
 coverage/
 *.tsbuildinfo
 
+# Playwright output (screenshots, traces, report; CI uploads them as artifacts)
+apps/web/e2e-artifacts/
+playwright-report/
+test-results/
+
 # Secrets
 .env
 .env.*
