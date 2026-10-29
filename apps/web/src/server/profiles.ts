@@ -1,3 +1,4 @@
+import "server-only";
 import { eq } from "drizzle-orm";
 import { balances, type Profile, profiles } from "@/db/schema";
 import type { AnyDb } from "@/db/types";
@@ -98,22 +99,34 @@ export interface Member {
   readonly points: number;
 }
 
-/** Profile plus balance, or `null` for an unknown or suspended user. */
-export async function loadMember(db: AnyDb, id: string): Promise<Member | null> {
+/** Profile plus balance, or `null` for an unknown user; `suspended` tells whether it is suspended. */
+export async function loadProfileMember(
+  db: AnyDb,
+  id: string,
+): Promise<{ readonly member: Member; readonly suspended: boolean } | null> {
   const [row] = await db
     .select({ profile: profiles, points: balances.points })
     .from(profiles)
     .leftJoin(balances, eq(balances.userId, profiles.id))
     .where(eq(profiles.id, id));
-  if (!row || row.profile.suspendedAt) {
+  if (!row) {
     return null;
   }
   const { profile } = row;
   return {
-    id: profile.id,
-    email: profile.email,
-    displayName: profile.displayName,
-    role: profile.role,
-    points: row.points ?? 0,
+    member: {
+      id: profile.id,
+      email: profile.email,
+      displayName: profile.displayName,
+      role: profile.role,
+      points: row.points ?? 0,
+    },
+    suspended: profile.suspendedAt !== null,
   };
+}
+
+/** Profile plus balance, or `null` for an unknown or suspended user. */
+export async function loadMember(db: AnyDb, id: string): Promise<Member | null> {
+  const found = await loadProfileMember(db, id);
+  return found && !found.suspended ? found.member : null;
 }

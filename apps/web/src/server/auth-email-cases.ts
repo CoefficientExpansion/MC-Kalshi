@@ -1,3 +1,4 @@
+import "server-only";
 // One table of addresses and the verdict for the default allowlist. Tested against the TypeScript
 // rule (`auth-email.test.ts`) and the SQL hook (`src/db/auth-hook.test.ts`) so the two cannot drift.
 // Test support only: nothing in the app imports this.

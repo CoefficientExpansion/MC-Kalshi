@@ -75,13 +75,20 @@ export const settings = pgTable("settings", {
   updatedAt: timestamptz("updated_at").notNull().defaultNow(),
 });
 
-/** A cache of SUM(ledger_entries.delta_points) per user; only `postTransfer` writes it. */
-export const balances = pgTable("balances", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => profiles.id),
-  points: points("points").notNull().default(0),
-});
+/**
+ * A cache of SUM(ledger_entries.delta_points) per user; only `postTransfer` writes it. Never
+ * negative (architecture §6 "Balance floor"): a transfer that would overdraw fails as a whole.
+ */
+export const balances = pgTable(
+  "balances",
+  {
+    userId: uuid("user_id")
+      .primaryKey()
+      .references(() => profiles.id),
+    points: points("points").notNull().default(0),
+  },
+  (t) => [check("balances_points_nonnegative", sql`${t.points} >= 0`)],
+);
 
 export const categories = pgTable("categories", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -122,6 +129,11 @@ export const markets = pgTable(
   },
   (t) => [
     check("markets_b_range", sql`${t.b} between 50 and 500`),
+    // A settled market has an outcome; every other status (voided included) has none.
+    check(
+      "markets_outcome_matches_status",
+      sql`(${t.status} in ('resolved', 'finalized')) = (${t.outcome} is not null)`,
+    ),
     index("markets_status_close_at_idx").on(t.status, t.closeAt),
   ],
 );
@@ -145,10 +157,15 @@ export const trades = pgTable(
     probBefore: doublePrecision("prob_before").notNull(),
     probAfter: doublePrecision("prob_after").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
+    /** Hash of the normalized request, so a replayed idempotency key can be compared in full. */
+    requestFingerprint: text("request_fingerprint").notNull(),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("trades_user_idempotency_key_uq").on(t.userId, t.idempotencyKey),
+    index("trades_market_id_idx").on(t.marketId),
+    // Rate limit and portfolio history: a user's recent trades.
+    index("trades_user_created_at_idx").on(t.userId, t.createdAt),
     check("trades_contracts_nonzero", sql`${t.contracts} <> 0`),
     check(
       "trades_prob_range",
@@ -173,6 +190,7 @@ export const positions = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.marketId, t.userId] }),
+    index("positions_user_id_idx").on(t.userId),
     check("positions_contracts_nonnegative", sql`${t.contractsYes} >= 0 and ${t.contractsNo} >= 0`),
   ],
 );
@@ -196,6 +214,7 @@ export const ledgerEntries = pgTable(
   },
   (t) => [
     index("ledger_entries_account_idx").on(t.accountType, t.accountId),
+    index("ledger_entries_ref_idx").on(t.refType, t.refId),
     check(
       "ledger_entries_house_account",
       sql`${t.accountType} <> 'house' or ${t.accountId} = '${sql.raw(HOUSE_ACCOUNT_ID)}'`,

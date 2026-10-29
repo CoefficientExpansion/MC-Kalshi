@@ -1,5 +1,5 @@
 # M3 — Trading: placeTrade, order ticket, positions, price chart, invariant job
-Status: draft · Milestone: M3 · Research: docs/research/kalshi/order-ticket.md, docs/research/kalshi/market-page.md · ADRs: 0001, 0002
+Status: in-progress (2026-10-29) · Milestone: M3 · Research: docs/research/kalshi/order-ticket.md, docs/research/kalshi/market-page.md · ADRs: 0001, 0002
 
 ## Problem
 Markets are readable (M2) but nobody can trade. M3 makes points move: a signed-in member buys or
@@ -28,14 +28,14 @@ Out: resolve/void/payouts (M4), real rate limiter and admin tools (M5), limit or
 leaderboard, "Also trading" block, realized-vs-unrealized P&L split (needs M4 settlement data).
 
 ## Acceptance criteria
-- [ ] Given a signed-in member with 10,000 points and a fresh b=100 market, when they buy YES with 500 points, then one trade of 9.76 contracts exists, balance is 9,500, the pool ledger is +500, `q_yes = 9.761859`, a snapshot exists, and the ticket quote matched.
-- [ ] Given a stale quote, when the price moved more than 2 points per contract, then nothing is written and the ticket offers the new price.
-- [ ] Given the same idempotency key sent concurrently, then exactly one trade exists and every caller gets it.
+- [x] Given a signed-in member with 10,000 points and a fresh b=100 market, when they buy YES with 500 points, then one trade of 9.76 contracts exists, balance is 9,500, the pool ledger is +500, `q_yes = 9.761859`, a snapshot exists, and the ticket quote matched.
+- [x] Given a stale quote, when the price moved more than 2 points per contract, then nothing is written and the ticket offers the new price.
+- [x] Given the same idempotency key sent concurrently, then exactly one trade exists and every caller gets it.
 - [ ] Given two parallel trades (real Postgres), then they serialize on the market lock and invariants hold.
-- [ ] Given a closed, paused, suspended, or underfunded case, then the matching error code returns and no rows change.
-- [ ] Given a random trade sequence, then ledger sum is 0, balances equal the ledger, positions equal `q`.
+- [x] Given a closed, paused, suspended, or underfunded case, then the matching error code returns and no rows change.
+- [x] Given a random trade sequence, then ledger sum is 0, balances equal the ledger, positions equal `q`.
 - [ ] Given the Playwright loop, then buy, sell, portfolio and the invariant route all pass; e2e sessions come from the Supabase admin API (if the fallback test-session route is used instead, it is 404 when `VERCEL` is set).
-- [ ] No UI string contains "bet", "$", "¢" or "cash out".
+- [x] No UI string contains "bet", "$", "¢" or "cash out".
 
 ## Key decisions
 1. **Core vs action.** `server/trading.ts` exports `placeTrade(db, userId, input, opts?)` (all logic, testable
@@ -52,19 +52,33 @@ leaderboard, "Also trading" block, realized-vs-unrealized P&L split (needs M4 se
 ## `placeTrade`
 Input: `{ marketId: uuid, side: "YES"|"NO", mode: "buy_points"|"buy_contracts"|"sell_contracts",
 amount: number, expectedAvgPrice: number, maxSlippage?: number (default 2, allowed 0–10),
-idempotencyKey: string (16–64 chars of [A-Za-z0-9_-]; the client sends `crypto.randomUUID()`) }`.
+expectedCostPoints?: number, idempotencyKey: string (16–64 chars of [A-Za-z0-9_-]; the client sends
+`crypto.randomUUID()`) }`.
 `amount` is whole points for `buy_points` (>= 1), else contracts with at most 6 decimals. `expectedAvgPrice`
-is points per contract (0–100), the average price the ticket displayed.
+is points per contract (0–100), the average price the ticket displayed. `expectedCostPoints` is the total cost
+the ticket displayed, a whole number >= 1: required for `buy_contracts` (else `invalid_input`), ignored and
+dropped for the other modes; it is part of `request_fingerprint`.
 
 Order of operations (any failure rolls the whole transaction back and writes nothing):
 0. Pre-transaction: `TRADING_PAUSED=true` -> `trading_paused`. Validate shape -> `invalid_input`. Look up
-   `(user_id, idempotencyKey)`; if found, return the original (step 8 rule). Call the rate-limit seam.
-1. `BEGIN`. Load the profile; missing -> `unauthenticated`; `suspended_at` set -> `account_suspended`.
+   `(user_id, idempotencyKey)`; if found, return the original (step 8 rule). Any throw while reading the
+   input (a revoked Proxy, a throwing getter) is `invalid_input`; each field is read once.
+1. `BEGIN`. Load the profile; missing -> `unauthenticated`; `suspended_at` set -> `account_suspended` (an early
+   answer; step 5b re-checks under the locks).
 2. `SELECT … FROM markets WHERE id = $1 FOR UPDATE`; none -> `market_not_found`.
 3. Re-check idempotency (a concurrent retry may have committed while we waited for the lock).
-4. `status <> 'open'` -> `market_not_open`; `close_at <= now()` -> `market_closed`.
+4. Status `proposed` or `rejected` (not in `PUBLIC_MARKET_STATUSES`) -> `market_not_found`, as the state route
+   answers 404; any other `status <> 'open'` -> `market_not_open`.
 5. `INSERT INTO balances … ON CONFLICT DO NOTHING`, then `SELECT … FROM balances WHERE user_id = $2 FOR UPDATE`.
-   Read the user's `positions` row (absent = `EMPTY_POSITION`).
+   a. With both locks held, re-read the profile `FOR SHARE`: missing -> `unauthenticated`; suspended ->
+      `account_suspended` (a suspension that committed while the trade waited stops it; one that starts now
+      waits for this commit).
+   b. Take the trade's time `T = clock_timestamp()` (not `now()`, which is the transaction's start and may be
+      long before a queued trade got its locks). `close_at <= T` -> `market_closed`. `T` is also
+      `trades.created_at` (set explicitly) and the snapshot's `at`.
+   c. Call the rate-limit seam with the transaction: one user's trades serialize on the balances lock, so each
+      count sees every trade committed before it.
+   d. Read the user's `positions` row (absent = `EMPTY_POSITION`).
 6. Parse `q_yes`/`q_no` with `parseNumeric`, build `MarketState {b, qYes, qNo}`, quote with the engine by mode.
    Any `EngineError` (whatever its `code`: `INVALID_STATE`, `INVALID_CONTRACTS`, `INVALID_POINTS`,
    `INVALID_SIDE`) maps to `invalid_input`; any other exception maps to `internal_error` and is logged.
@@ -76,12 +90,15 @@ Order of operations (any failure rolls the whole transaction back and writes not
       The engine clamps `avgPrice` to 1..99: a sell on a side whose probability is about 1 reports 99 while
       paying about 100 per contract, and `withinSlippage` compares these clamped prices.
    b. `withinSlippage(expectedAvgPrice, quote, maxSlippage)` else `slippage_exceeded` with a fresh `requote`.
+      For `buy_contracts` also `withinCostSlippage(expectedCostPoints, quote.costPoints, maxSlippage,
+      quote.contracts)` (`server/quote.ts`): the fill's `costPoints` may exceed `expectedCostPoints` by at most
+      `ceil(maxSlippage × contracts)`, else `slippage_exceeded` with the same `requote`.
    c. Buy: `balance >= quote.costPoints` else `insufficient_balance {balance, needed}`.
       Sell: held contracts on that side >= amount else `insufficient_position {held}`.
 8. `INSERT INTO trades … ON CONFLICT (user_id, idempotency_key) DO NOTHING RETURNING *`. No row means another
    transaction won the unique constraint (for example the same key sent for two different markets at once):
    roll back, re-read the original, and return it with `replayed: true` only if the full original input matches
-   (market, side, mode, amount, `expectedAvgPrice`, `maxSlippage`; stored as `trades.request_fingerprint`,
+   (market, side, mode, amount, `expectedAvgPrice`, `maxSlippage`, `expectedCostPoints`; stored as `trades.request_fingerprint`,
    see Data touched), else `idempotency_key_reused`. The pre-transaction and step 3 lookups apply the same comparison. A replay never re-validates market status, balance or slippage.
 9. `applyFill(position, quote)`; upsert `positions` (`ON CONFLICT (market_id, user_id) DO UPDATE`).
 10. `UPDATE markets SET q_yes, q_no` from `quote.stateAfter` (absolute values; exact multiples of 1e-6).
@@ -116,9 +133,10 @@ meet; no SQL arithmetic on `q` or contracts; points (`bigint` mode number) stay 
 | Maximum amount sanity | contracts <= 1e6, points <= 1e9 | Rejects absurd input before the engine sees it. |
 Constants live in `server/trade-limits.ts` (one place; later movable to `settings`).
 
-**Rate limit.** M3 ships the seam `checkTradeRateLimit(db, userId, now)` and a cheap implementation: count the
-user's trades in the last 60 s (new index `trades(user_id, created_at)`), limit `TRADE_RATE_LIMIT_PER_MIN`
-(default 20) -> `rate_limited`. M5 replaces the body with the shared limiter and adds proposals; the
+**Rate limit.** M3 ships the seam `checkTradeRateLimit(db, userId)` and a cheap implementation: count the
+user's trades in the last 60 s of the database clock (`clock_timestamp()`; new index `trades(user_id, created_at)`),
+limit `TRADE_RATE_LIMIT_PER_MIN` (default 20) -> `rate_limited`. `placeTrade` calls it inside the transaction after
+the balances lock (step 5c), so parallel requests from one user cannot all pass on the same count. M5 replaces the body with the shared limiter and adds proposals; the
 call site and error code do not change.
 
 **Who may trade.** Signed-in, not suspended, market `open` and before `close_at`, balance sufficient for a buy,
@@ -149,7 +167,7 @@ Pattern adopted from `order-ticket.md` (behavior only), tokens and copy from `do
   error (inline, `role="alert"`, fixed copy per code: "Not enough points: you have 320 and need 500",
   "You only hold 4.2 YES contracts", "Too small: the smallest trade is 0.01 contracts", "Too big: the most you
   can buy at once here is 5,000 pts", "Slow down a little and try again in 12 s", "Trading is paused").
-- Copy lives in `lib/trade-copy.ts`; a test scans it and every ticket string for `bet|wager|prize|cash out|\$|¢`.
+- Copy lives in `lib/trade-copy.ts`; a test scans it and every ticket string for bet, wager, prize, cash out (whole words) and `$`, `¢`. Source files are scanned for user-visible text only (string literals and JSX text; not className values, import paths, template placeholders or comments), so a class such as `justify-between` passes.
 - Accessibility: radiogroup semantics for the toggles, labelled input, quote rows in an `aria-live="polite"` region.
 - Polling: `GET /api/markets/[id]/state` (`no-store`) returns `{status, closeAt, b, qYes, qNo, probabilityYes}` plus, when
   signed in, `{balance, position}`; the page polls every 3 s while visible and stops when the tab is hidden.
@@ -239,7 +257,7 @@ in the app bundle. **Fallback only if that proves impractical:** a test-only rou
 email) that creates the profile with `grantSignupBonus` and sets an HMAC-signed `e2e-session` cookie;
 `getCurrentUser()` accepts that cookie only when `isE2EAuthEnabled()` is true. **Guard (one function, unit-tested,
 including a case with `VERCEL=1`):** `E2E_AUTH_BYPASS === "1"` AND `E2E_AUTH_SECRET`
-is set AND `process.env.VERCEL` is unset. `NODE_ENV` is not usable because `next start` forces `production`; Vercel
+is set AND `process.env.GITHUB_ACTIONS === "true"` (added after the security review) AND `process.env.VERCEL` is unset. `NODE_ENV` is not usable because `next start` forces `production`; Vercel
 always sets `VERCEL`, so the bypass cannot run on production or previews even if the flag leaks there. The route returns
 404 when the guard is false. Tests:
 - Trade loop: sign in -> open a seeded market -> type 500 points on YES -> quote shows -> submit -> success text, balance
@@ -307,12 +325,13 @@ Database and server:
 - [ ] `import "server-only"` in server modules.
 
 Engine use in `placeTrade` (from the engine review on `feat/m2-integrate`):
-- [ ] `withinSlippage` compares `avgPrice`, which measures how far the price moved from the exact cost. The
+- [x] `withinSlippage` compares `avgPrice`, which measures how far the price moved from the exact cost. The
   one-point minimum charge on tiny buys is not price movement, so the order ticket shows `costPoints`. For
-  contract-amount orders, `placeTrade` also rejects when the fill's `costPoints` is more than
-  `ceil(maxSlippage × contracts)` above the quoted `costPoints`. Point-budget orders are already capped by
-  `quotePoints`.
-- [ ] `applyFill` does not tie `costPoints` to `contracts`, so `placeTrade` builds every fill from a fresh engine
+  contract-amount orders the ticket sends the displayed total as `expectedCostPoints` (required for
+  `buy_contracts`), and `placeTrade` also rejects with `slippage_exceeded` when the fill's `costPoints` is more
+  than `ceil(maxSlippage × contracts)` above it (`withinCostSlippage`). Point-budget orders are already capped by
+  `quotePoints`; sells are bounded by `withinSlippage` alone.
+- [x] `applyFill` does not tie `costPoints` to `contracts`, so `placeTrade` builds every fill from a fresh engine
   quote, never from client input.
 - [ ] `settlePayouts` and `voidRefunds` find duplicate users by `Map` key identity, so callers key them by user id
   strings, never by objects.
@@ -336,24 +355,127 @@ Parallel chunks A–D start after task 0. Each chunk can go to a separate implem
 5. `buildTicketQuote` + `trade-copy.ts` + copy guard — TDD. Verify by: quote equals server quote; banned-word scan.
 6. `OrderTicket` (desktop card, mobile sheet), polling hook, all states and slippage re-quote. Verify by: manual 390 px and 1280 px screenshots, keyboard and screen-reader pass.
 **C. Portfolio and chart**
-7. `getPortfolio`, `getPriceHistory` (+ downsampling) — TDD on PGlite. Verify by: loader tests with fixtures from `placeTrade`.
-8. `PriceChart`, position card, `/portfolio`. Verify by: render tests, screenshot light/dark, `aria-label` summary.
+7. [x] `getPortfolio`, `getPriceHistory` (+ downsampling) — TDD on PGlite. Verify by: loader tests with fixtures from `placeTrade` (`server/portfolio.test.ts`, `server/price-history.test.ts`).
+8. [x] `PriceChart`, position card, `/portfolio`. Verify by: render tests and the `aria-label` summary (`components/market/price-chart.test.ts`, `position-card.test.ts`, `app/portfolio/page.test.ts`). Still open: light/dark screenshots by a human.
 **D. Invariants and CI**
 9. `checkTradingInvariants` + deliberate-corruption tests (corrupt rows directly in a test DB, for example `UPDATE markets SET q_yes` or an extra `positions` row; the append-only triggers cover only `ledger_entries` and `trades`) — verify by: each issue type is detected.
 10. Cron route, `vercel.json`, `CRON_SECRET` check. Verify by: 401/200/500 route tests; log line shape.
 11. Concurrency suite on the existing CI Postgres service (lock witness, balance race, key race). Verify by: green in CI; skipped with a note locally.
 **E. Integration (last)**
 12. E2E auth via the service role / admin API (fallback: test-session route with `isE2EAuthEnabled` + guard tests), Playwright config, trade-loop spec, CI `e2e` job. Verify by: e2e green in CI; with `VERCEL=1` the test route returns 404.
-13. Adversarial review (doubt-driven) of `placeTrade`; `/security-review`; confirm `docs/architecture.md` §6/§9 (balances lock, idempotency order, balance floor) still match the code; SOP-06 invariant-alert steps. Verify by: findings fixed or recorded here.
+13. [x] Adversarial review (doubt-driven) of `placeTrade` (findings and fixes below). Still open: `/security-review`; confirm `docs/architecture.md` §6/§9 (balances lock, idempotency order, balance floor) still match the code; SOP-06 invariant-alert steps. Verify by: findings fixed or recorded here.
+
+## Adversarial review (task 13)
+
+Doubt-driven review of `placeTrade` on `feat/m3-trading`. Fixed, each with a failing test first:
+1. **Medium: the rate limit raced.** `checkTradeRateLimit` counted committed trades before any lock, so 100
+   parallel requests from one user all passed. It now runs inside the transaction after the balances lock
+   (step 5c); same code and `retryAfterSec`. Tests: PGlite (the seam sees the balance row step 5 created);
+   real Postgres (25 parallel trades from one user, distinct keys: exactly 20 succeed, 5 `rate_limited`).
+2. **Medium: a suspension could miss a queued trade.** Step 1 read `suspended_at` without a lock, before the
+   market-lock wait. Step 5a re-reads the profile `FOR SHARE` after both locks. Test: real Postgres (hold the
+   market lock, start a trade, commit a suspension, release: `account_suspended`, nothing written).
+3. **Medium: `now()` is the transaction's start.** A trade that waited past `close_at` filled, and stored times
+   did not follow lock order. Step 5b takes `clock_timestamp()` after the locks for the `close_at` check,
+   `trades.created_at` (set explicitly) and the snapshot's `at`; the rate-limit window uses `clock_timestamp()`
+   too. Tests: PGlite (inside an outer transaction that has slept, a market that closed after `BEGIN` is
+   `market_closed`, and the stored times lag `now()`; the rate-limit window ignores trades that left it during
+   the transaction); real Postgres (a trade queued behind a held lock past `close_at` is `market_closed`).
+4. **Medium: hostile input threw.** `Array.isArray` ran outside the `try`, so a revoked Proxy threw from both
+   `parseTradeInput` and `placeTrade`. All inspection is inside the `try`; any throw is `invalid_input` with no
+   internal text, and each field is read once. Tests: revoked Proxy, throwing getter, changing getter.
+5. **Low: `internal_error` copy claimed nothing was traded.** A failed `COMMIT` can still have applied. Copy is
+   now "Something went wrong. Check your portfolio before trying again."; the ticket keeps the same key on
+   retry, so a retry after an applied commit is a replay.
+6. **Low: `proposed`/`rejected` markets answered `market_not_open`** while the state route answers 404. They
+   now answer `market_not_found` (`PUBLIC_MARKET_STATUSES`).
+7. **Low: `trades.request_fingerprint` was nullable.** Migration `0006_trades_fingerprint_not_null` sets it
+   `NOT NULL` (no environment has trades yet); a test shows an insert without it fails.
+
+Accepted (Low, not fixed):
+- A replay reports the realized average price (`|cost| / |contracts|`, clamped 1–99), not the engine's, and reads
+  the current position, balance and market state in separate statements, outside one snapshot.
+- `TRADING_PAUSED` is read once at step 0, so trades already in flight when the switch flips still commit.
+- The rate-limit seam takes no `now` parameter: it uses the database clock instead (the spec's earlier
+  `checkTradeRateLimit(db, userId, now)` is superseded).
+
+## Execution plan (orchestrator, 2026-10-29)
+
+Built on branch `feat/m3-trading` in waves; each implementer works in its own git worktree and branch, and the orchestrator merges, runs the gate, and reviews between waves. Merge to `main` waits for the owner's confirmation of the two assumptions below (confirmed 2026-10-29; see "Ship decision").
+
+Assumptions (recommended defaults from this spec, owner to confirm before merge to `main`):
+1. Balance floor: `CHECK (points >= 0)` on `balances` ships in this slice; for M4 voids, a `void_refund` debit larger than a user's balance is covered by a separate house → user entry (architecture §6 "Balance floor").
+2. Per-trade cap `min(5000, 50·b)` points and slippage choices 1 / 2 / 5 points as proposed.
+3. E2E authentication uses the guarded test-session route (the fallback above): CI has no Supabase project or service-role secret.
+4. App database role: a migration creates a `NOLOGIN` role `mc_app` with the minimum grants (no UPDATE/DELETE/TRUNCATE on `ledger_entries` or `trades`); migrations use `MIGRATION_DATABASE_URL` (owner) when set, else `DATABASE_URL`. The owner enables login for `mc_app` and points `DATABASE_URL` at it (new owner step); until then the app keeps working as today. Recorded in ADR-0006.
+
+Waves:
+- **Wave 1** (parallel): (a) database hardening and the M2-review test items: migrations for REVOKE + default privileges, indexes, the `markets` outcome/status CHECK, the `balances` floor, `trades.request_fingerprint`, the `trades(user_id, created_at)` index, the `mc_app` role and ADR-0006; RLS-by-role, unique-index and real-Postgres concurrency tests for `grantSignupBonus` and `postTransfer`; journal-length migration test; no test-order coupling; ledger and profiles suites in the CI Postgres job. (b) Task 0 and task 1 (contract types, trade limits, numeric boundary, `server/quote.ts` adapter, size rules) plus `server-only` imports, the production `DATABASE_CA_CERT` guard and `adaptSupabaseAuth` tests.
+- **Wave 2** (parallel): tasks 2–4 (`placeTrade`, property test, action, rate limit, pause switch, state endpoint); tasks 5–6 (ticket quote, copy, order ticket against the types); task 9–10 (`checkTradingInvariants`, cron route).
+- **Wave 3** (parallel): tasks 7–8 (portfolio, price history, chart, position card); task 11 (concurrency suite); wiring the ticket to the real action.
+- **Wave 4**: task 12 (e2e and CI job), task 13 (adversarial review of `placeTrade`, security review), ship.
+
+## Ship decision (2026-10-29)
+**Ship M3 to `main`.**
+- The owner confirmed assumptions 1 and 2: points never go negative, M4 void shortfalls are covered by a
+  separate house -> user entry, and the per-trade cap and slippage choices stay as proposed.
+- CI is green on `606a2f7` (gate, real Postgres 16, Playwright e2e).
+- The adversarial review (task 13) found no open item above Low. The two accepted Lows are listed in
+  that section.
+- The M3 security review found 0 Critical, 0 High, 1 Medium and 3 Lows; all four are fixed in `3a408cc`:
+  - Medium: Production refuses any database role but `mc_app`.
+  - Low: the e2e bypass also requires `GITHUB_ACTIONS`.
+  - Low: `mc_app` updates only `display_name` and `leaderboard_opt_out` on `profiles` (migration 0007).
+  - Low: new functions are no longer executable by `PUBLIC`.
+- Both Supabase projects run migrations 0000–0007 with the seed and the sign-up hook. Production has no
+  database URL until the owner finishes the `mc_app` steps in `docs/owner-todos.md`, "Go live".
+- One Definition of Done item is open: the human check of the sign-in and trade loop on `prod`, which
+  waits for those owner steps.
 
 ## Definition of Done
-- [ ] Acceptance criteria met and demonstrated (test or screenshot)
-- [ ] Unit tests for logic; Playwright for any user-visible flow that moves points
-- [ ] `npm run typecheck && npm run lint && npm test` green locally and in CI
-- [ ] No secrets in code; new env vars documented in `.env.example`
-- [ ] Docs or ADR updated when behavior or a decision changed
-- [ ] Preview deploy checked by a human
+- [x] Acceptance criteria met and demonstrated (test or screenshot)
+- [x] Unit tests for logic; Playwright for any user-visible flow that moves points
+- [x] `npm run typecheck && npm run lint && npm test` green locally and in CI
+- [x] No secrets in code; new env vars documented in `.env.example`
+- [x] Docs or ADR updated when behavior or a decision changed
+- [ ] Preview deploy checked by a human (after the owner's go-live steps)
 
 ## Next
 Hand chunks A–D to implementers after task 0; the orchestrator adds the README row. M4 decides positions after
 resolve/void and extends `checkTradingInvariants` accordingly.
+Ticket UI (tasks 5–6) is built as `LiveOrderTicket` in `components/market/order-ticket.tsx` and is wired into
+`/markets/[slug]` through `components/market/market-trade-panel.tsx` (the placeholder is deleted); still to do: the
+390 px / 1280 px screenshots and keyboard and screen-reader pass, light/dark chart screenshots, and the e2e loop (task 12).
+
+## Decisions made while building tasks 7–8 and the page wiring (2026-10-29)
+1. **Portfolio header.** "Open positions" sums value now over markets in `open` or `closed` status only; resolved,
+   finalized and voided rows are still listed (after them, by `close_at`) but not added, since their value is
+   M4 settlement, not a price. Total = balance + that sum. Rows with zero contracts on both sides are hidden even
+   if their cost basis is not 0. Value per side is rounded before summing. Pure helper `lib/position-value.ts`
+   is shared by the loader and the position card.
+2. **Trade price in history** is the realized average `|cost_points| / |contracts|`, rounded and clamped to 1–99
+   (the same rule `placeTrade` uses for replays); trades store no engine average.
+3. **/portfolio access** uses `getSessionMember()`: signed out (or no database) redirects to `/sign-in`; a
+   suspended member may view it read-only. A failed load shows an "unavailable" notice, not a 500.
+4. **Chart range start.** `ALL` starts at `opened_at ?? created_at` with the first trade's `prob_before` (else
+   0.5). `1D`/`1W` start at `max(opening, now − span)`; when that cuts the history, the first point carries the
+   last snapshot before the cut (the price in force then), so the step line stays truthful.
+5. **Downsampling** splits `[from, now]` into 198 equal buckets and keeps the last snapshot per bucket; with the
+   start and "now" points that is at most 200 (`MAX_CHART_POINTS`). The range end uses the app clock (the page's
+   request time), which is fine for a read-only chart.
+6. **"No trades yet"** shows when the market has no snapshot at all (or under 2 points). A market with trades but
+   none inside the range draws a flat line at the carried price ("no change over the last day"), not the empty state.
+7. **Chart interaction.** Ranges are `<Link href="?range=…">` (server-rendered, `aria-current` on the active one,
+   unknown values fall back to `1W`). The chart is a small client component only for the hover/touch crosshair
+   (time in campus time and "YES NN%"); the crosshair is `aria-hidden`, and the `role="img"` label carries the
+   summary. Headline change is in whole display points: "up 4", "down 3", "no change".
+8. **Refresh after a trade.** `MarketTradePanel` wraps `LiveOrderTicket` and calls `router.refresh()` on success,
+   so the server-rendered headline price, chart, position card and header balance update without a reload.
+9. **Page layout.** On narrow screens the order is headline → chart → YES/NO buttons → position card → prices,
+   rules, dates (the research note's "buttons under the chart"); from 1024 px the ticket and position card are a
+   sticky right column spanning both blocks. The page passes `getSessionMember()`'s balance and position even
+   for a suspended member, so the ticket shows "Your account can't trade right now".
+10. **Polling for suspended members.** `GET /api/markets/[id]/state` now uses `getSessionMember()` too, so the
+   poll does not drop a suspended member's balance and position.
+11. **Sell requote.** After `slippage_exceeded` on a sell, the requote rows keep "Left in position" (held minus
+   the order's contracts).

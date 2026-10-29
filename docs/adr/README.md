@@ -10,6 +10,7 @@ Use `documentation-and-adrs` (agent-skills) to draft; keep each under a page.
 | [0003](0003-stack-nextjs-supabase-typescript.md) | TypeScript monorepo: Next.js + Supabase (Postgres, Auth) + Drizzle on Vercel | Accepted |
 | [0004](0004-development-model.md) | Spec-driven, test-first, incremental, trunk-based development | Accepted |
 | [0005](0005-rea-project-scoped.md) | REA installed and registered for this project only | Accepted |
+| [0006](0006-app-database-role.md) | The app connects as a restricted `mc_app` role; migrations run as the owner | Proposed |
 
 ## Template
 ```markdown

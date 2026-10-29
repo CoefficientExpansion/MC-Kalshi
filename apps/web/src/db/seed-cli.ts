@@ -1,7 +1,9 @@
 import { getDb } from "./index";
 import { seedDatabase } from "./seed";
+import { resolveMigrationDatabaseUrl } from "./url";
 
-// `npm run db:seed`: seeds the database named by DATABASE_URL (apps/web/.env.local when present).
+// `npm run db:seed`: seeds the database named by MIGRATION_DATABASE_URL, else DATABASE_URL, else
+// POSTGRES_URL_NON_POOLING, else POSTGRES_URL (src/db/url.ts; apps/web/.env.local when present).
 // An async main(), not top-level await: tsx runs this package's .ts files as CommonJS.
 async function main() {
   try {
@@ -10,9 +12,15 @@ async function main() {
     // no .env.local: rely on the process environment
   }
 
+  // Seeding inserts categories, which the app role (mc_app, ADR-0006) may not do: use the owner
+  // connection that migrations use, by the same precedence.
+  const url = resolveMigrationDatabaseUrl();
+  if (url) {
+    process.env.DATABASE_URL = url;
+  }
   const db = getDb();
   if (!db) {
-    console.error("DATABASE_URL is not set: nothing to seed.");
+    console.error("No database URL is set (see apps/web/.env.example): nothing to seed.");
     process.exitCode = 1;
     return;
   }

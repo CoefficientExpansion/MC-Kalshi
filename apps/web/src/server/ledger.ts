@@ -1,3 +1,4 @@
+import "server-only";
 import { and, eq, sql } from "drizzle-orm";
 import { balances, HOUSE_ACCOUNT_ID, type LedgerEntry, ledgerEntries } from "@/db/schema";
 import type { AnyDb } from "@/db/types";
@@ -85,15 +86,16 @@ export async function postTransfer(tx: AnyDb, transfer: Transfer): Promise<Ledge
         perUser.set(e.accountId, (perUser.get(e.accountId) ?? 0) + e.deltaPoints);
       }
     }
-    // One upsert per user (sorted: a stable lock order avoids deadlocks between concurrent transfers).
+    // Per user, sorted (a stable lock order avoids deadlocks between concurrent transfers): make
+    // sure the row exists, then add the delta. Not one upsert: Postgres checks the
+    // `points >= 0` CHECK on the proposed insert row before ON CONFLICT, so a debit would always
+    // fail. An overdraft fails the UPDATE with check_violation and the whole transfer rolls back.
     for (const [userId, delta] of [...perUser].sort(([a], [b]) => a.localeCompare(b))) {
+      await inner.insert(balances).values({ userId, points: 0 }).onConflictDoNothing();
       await inner
-        .insert(balances)
-        .values({ userId, points: delta })
-        .onConflictDoUpdate({
-          target: balances.userId,
-          set: { points: sql`${balances.points} + ${delta}` },
-        });
+        .update(balances)
+        .set({ points: sql`${balances.points} + ${delta}` })
+        .where(eq(balances.userId, userId));
     }
     return rows;
   });

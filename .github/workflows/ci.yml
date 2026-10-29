@@ -31,13 +31,15 @@ jobs:
       - run: npm run coverage -w packages/engine
       - run: npm run build
 
-  # The in-process PGlite tests cannot open a second connection, so row locking, the append-only
-  # triggers and the sign-up hook are also exercised against a real server. Runs in parallel with
-  # `gate`; the test creates and drops its own database.
+  # The in-process PGlite tests cannot open a second connection, so row locking, concurrency, the
+  # append-only triggers, role privileges and the sign-up hook are also exercised against a real
+  # server. With TEST_DATABASE_URL set, `openTestDb` gives each suite throwaway databases on this
+  # server instead of PGlite, so the ledger, profiles, migrations and privileges suites run here
+  # too. Runs in parallel with `gate`; every test creates and drops its own database.
   postgres:
     name: real Postgres integration
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16.9
@@ -61,4 +63,99 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npx vitest run --project web apps/web/src/db/postgres.integration.test.ts
+      - run: >-
+          npx vitest run --project web
+          apps/web/src/db/postgres.integration.test.ts
+          apps/web/src/db/postgres.concurrency.integration.test.ts
+          apps/web/src/db/test-db.test.ts
+          apps/web/src/db/migrations.test.ts
+          apps/web/src/db/privileges.test.ts
+          apps/web/src/server/ledger.test.ts
+          apps/web/src/server/profiles.test.ts
+          apps/web/src/server/trading.concurrency.integration.test.ts
+
+  # Playwright against the built app (docs/specs/m3-trading.md, "Playwright e2e"). CI has no
+  # Supabase project, so the app runs with the CI-only test sign-in (E2E_AUTH_BYPASS=1 and a
+  # secret generated per run; it also needs GITHUB_ACTIONS=true, which GitHub sets in every job;
+  # off on Vercel by construction, see apps/web/src/server/e2e-auth.ts).
+  e2e:
+    name: Playwright e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16.9
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # The app always connects with TLS (ssl "require", apps/web/src/db/index.ts), so turn it on
+      # in the service with the image's self-signed snakeoil certificate, then prove it works.
+      - name: Enable TLS on the Postgres service
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 \
+            -c "ALTER SYSTEM SET ssl_cert_file = '/etc/ssl/certs/ssl-cert-snakeoil.pem'" \
+            -c "ALTER SYSTEM SET ssl_key_file = '/etc/ssl/private/ssl-cert-snakeoil.key'" \
+            -c "ALTER SYSTEM SET ssl = on" \
+            -c "SELECT pg_reload_conf()"
+          sleep 2
+          psql "postgres://postgres:postgres@localhost:5432/postgres?sslmode=require" \
+            -v ON_ERROR_STOP=1 -c "SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()"
+      - run: npm run db:migrate
+      - run: npm run db:seed
+      - run: npm run build
+      - name: Generate per-run secrets
+        run: |
+          e2e_secret="$(openssl rand -hex 32)"
+          cron_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$e2e_secret"
+          echo "::add-mask::$cron_secret"
+          echo "E2E_AUTH_SECRET=$e2e_secret" >> "$GITHUB_ENV"
+          echo "CRON_SECRET=$cron_secret" >> "$GITHUB_ENV"
+      - name: Start the app
+        working-directory: apps/web
+        env:
+          E2E_AUTH_BYPASS: "1"
+        run: nohup npx next start --port 3000 > "$RUNNER_TEMP/next-start.log" 2>&1 &
+      - name: Wait for /api/health
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:3000/api/health; then exit 0; fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/next-start.log"
+          exit 1
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+      - name: Copy the server log next to the artifacts
+        if: always()
+        run: |
+          mkdir -p apps/web/e2e-artifacts
+          cp "$RUNNER_TEMP/next-start.log" apps/web/e2e-artifacts/ || true
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          # Screenshots, the HTML report (e2e-artifacts/playwright-report), traces and the server log.
+          name: e2e-artifacts
+          path: apps/web/e2e-artifacts
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,3 +1,4 @@
+import "server-only";
 // The sign-in domain rule (CLAUDE.md hard constraint 2). Pure: no I/O, no framework imports.
 //
 // This is the application-side check. The guard is the Postgres hook

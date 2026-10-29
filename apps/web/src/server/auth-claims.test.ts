@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { profiles } from "@/db/schema";
 import { createTestDb, type TestDb } from "@/db/test-db";
 import { DEFAULT_ALLOWED_DOMAINS } from "./auth-email";
-import { memberForClaims } from "./auth-flow";
+import { memberForClaims, sessionMemberForClaims } from "./auth-flow";
 import { ensureProfile } from "./profiles";
 
 const USER_ID = "30000000-0000-4000-8000-000000000001";
@@ -69,5 +69,65 @@ describe("memberForClaims (session re-check on every request)", () => {
     await db.update(profiles).set({ suspendedAt: new Date() }).where(eq(profiles.id, USER_ID));
     expect(await member({ sub: USER_ID, email: EMAIL })).toBeNull();
     await db.update(profiles).set({ suspendedAt: null }).where(eq(profiles.id, USER_ID));
+  });
+});
+
+describe("sessionMemberForClaims (a valid session, suspended or not)", () => {
+  let db: TestDb;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, close } = await createTestDb());
+    await ensureProfile(db, { id: USER_ID, email: EMAIL }, 100);
+  });
+  afterAll(async () => {
+    await close();
+  });
+
+  const session = (claims: { sub?: unknown; email?: unknown } | undefined) =>
+    sessionMemberForClaims(db, claims, DEFAULT_ALLOWED_DOMAINS);
+
+  it("returns userId, profile and suspended: false for an active member", async () => {
+    expect(await session({ sub: USER_ID, email: EMAIL })).toEqual({
+      userId: USER_ID,
+      profile: expect.objectContaining({ id: USER_ID, email: EMAIL, points: 100 }),
+      suspended: false,
+    });
+  });
+
+  it("still returns a suspended member, with suspended: true", async () => {
+    await db.update(profiles).set({ suspendedAt: new Date() }).where(eq(profiles.id, USER_ID));
+    try {
+      expect(await session({ sub: USER_ID, email: EMAIL })).toEqual({
+        userId: USER_ID,
+        profile: expect.objectContaining({ id: USER_ID }),
+        suspended: true,
+      });
+      // memberForClaims keeps treating the same session as signed out.
+      expect(
+        await memberForClaims(db, { sub: USER_ID, email: EMAIL }, DEFAULT_ALLOWED_DOMAINS),
+      ).toBeNull();
+    } finally {
+      await db.update(profiles).set({ suspendedAt: null }).where(eq(profiles.id, USER_ID));
+    }
+  });
+
+  it("returns null when signed out, for a bad sub, or for an unknown user", async () => {
+    expect(await session(undefined)).toBeNull();
+    expect(await session({ sub: "not-a-uuid", email: EMAIL })).toBeNull();
+    expect(await session({ sub: "30000000-0000-4000-8000-0000000000ff", email: EMAIL })).toBeNull();
+  });
+
+  it("returns null when the email is no longer allowed or differs from the profile, even if suspended", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await db.update(profiles).set({ suspendedAt: new Date() }).where(eq(profiles.id, USER_ID));
+    try {
+      for (const email of ["jane@gmail.com", "someone.else@maryvillecollege.edu", undefined]) {
+        expect(await session({ sub: USER_ID, email }), String(email)).toBeNull();
+      }
+    } finally {
+      await db.update(profiles).set({ suspendedAt: null }).where(eq(profiles.id, USER_ID));
+      spy.mockRestore();
+    }
   });
 });

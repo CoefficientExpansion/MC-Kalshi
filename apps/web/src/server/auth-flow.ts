@@ -1,6 +1,7 @@
+import "server-only";
 import type { AnyDb } from "@/db/types";
 import { isAllowedEmail, normalizeEmail } from "./auth-email";
-import { ensureProfile, loadMember, type Member, ProfileError } from "./profiles";
+import { ensureProfile, loadProfileMember, type Member, ProfileError } from "./profiles";
 
 // The sign-in steps, free of Next.js and of the Supabase SDK so they run against fakes in tests.
 // `auth.ts` wires them to the real client, cookies and database.
@@ -188,17 +189,26 @@ export async function signOutOf(client: OtpClient | undefined): Promise<void> {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** A verified, allowed session and its profile, suspended or not. */
+export interface SessionMember {
+  readonly userId: string;
+  readonly profile: Member;
+  /** The profile is suspended: it may not trade, and `memberForClaims` treats it as signed out. */
+  readonly suspended: boolean;
+}
+
 /**
- * The member a verified session belongs to, or `null`. Runs on every request, so a session that
+ * The profile a verified session belongs to, or `null`. Runs on every request, so a session that
  * outlives its sign-in checks stops working: the email in the token must still be an allowed
  * address (a member can change it through Supabase's `updateUser`, which the sign-up hook does
- * not see) and must still be the one on the profile. Never throws on bad claims; logs no address.
+ * not see) and must still be the one on the profile. A suspended profile is returned with
+ * `suspended: true`. Never throws on bad claims; logs no address.
  */
-export async function memberForClaims(
+export async function sessionMemberForClaims(
   db: AnyDb,
   claims: { readonly sub?: unknown; readonly email?: unknown } | undefined,
   domains: readonly string[],
-): Promise<Member | null> {
+): Promise<SessionMember | null> {
   const sub = claims?.sub;
   if (typeof sub !== "string" || !UUID.test(sub)) {
     return null;
@@ -208,13 +218,26 @@ export async function memberForClaims(
     console.error("[auth] session refused: email claim is missing or not allowed");
     return null;
   }
-  const member = await loadMember(db, sub);
-  if (!member) {
+  const found = await loadProfileMember(db, sub);
+  if (!found) {
     return null;
   }
-  if (normalizeEmail(email) !== normalizeEmail(member.email)) {
+  if (normalizeEmail(email) !== normalizeEmail(found.member.email)) {
     console.error("[auth] session refused: email claim differs from the profile");
     return null;
   }
-  return member;
+  return { userId: found.member.id, profile: found.member, suspended: found.suspended };
+}
+
+/**
+ * The member a verified session belongs to, or `null`: {@link sessionMemberForClaims}, with a
+ * suspended member treated as signed out.
+ */
+export async function memberForClaims(
+  db: AnyDb,
+  claims: { readonly sub?: unknown; readonly email?: unknown } | undefined,
+  domains: readonly string[],
+): Promise<Member | null> {
+  const session = await sessionMemberForClaims(db, claims, domains);
+  return session && !session.suspended ? session.profile : null;
 }
