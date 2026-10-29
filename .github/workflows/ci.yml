@@ -72,3 +72,4 @@ jobs:
           apps/web/src/db/privileges.test.ts
           apps/web/src/server/ledger.test.ts
           apps/web/src/server/profiles.test.ts
+          apps/web/src/server/trading.concurrency.integration.test.ts
