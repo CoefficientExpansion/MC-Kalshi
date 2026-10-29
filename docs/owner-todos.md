@@ -36,6 +36,14 @@ and delete a line once it is done. Last updated 2026-10-29 (after the engine dec
   TLS but the certificate is not verified.
 - [ ] After the merge: `npm run db:migrate`, then `npm run db:seed`, against `dev` from your machine.
 - [ ] Check `https://mc-kalshi.vercel.app/api/health` reports `db: "ok"`.
+- [ ] **App database role** (ADR-0006, after migration `0005_app_role`): Supabase -> SQL Editor, run
+  `ALTER ROLE mc_app WITH LOGIN PASSWORD '<a new generated password>';` (never paste it into chat).
+  Then copy your current owner string into `MIGRATION_DATABASE_URL` in `apps/web/.env.local`, and
+  point `DATABASE_URL` (Vercel Preview + Production and `.env.local`) at `mc_app`: same host, user
+  `mc_app.<project-ref>` on the pooler, the new password, `?sslmode=require`. Check `/api/health`
+  still reports `db: "ok"` and a new sign-in still gets its points. Run `npm run db:seed` with
+  `DATABASE_URL` set to the owner string (`mc_app` may not insert categories). Until this step is
+  done the app keeps working as the owner.
 - [ ] Table Editor: RLS enabled on all 11 tables.
 - [ ] **Enable the before-user-created hook** (after migration `0002_auth_signup_hook`): Authentication
   -> Hooks -> Before User Created -> Postgres function -> `hook_before_user_created` (schema
@@ -54,6 +62,9 @@ and delete a line once it is done. Last updated 2026-10-29 (after the engine dec
 - [ ] `DATABASE_URL` (pooled), the three `NEXT_PUBLIC_SUPABASE_*` values and `DATABASE_CA_CERT` in
   Vercel -> Production only.
 - [ ] Run `npm run db:migrate` against `prod` at the first release (SOP-05).
+- [ ] **App database role on `prod`**, same steps as `dev` with a different password:
+  `ALTER ROLE mc_app WITH LOGIN PASSWORD '...'` in the SQL Editor, Production `DATABASE_URL` ->
+  `mc_app`, and the owner string only where you run migrations (`MIGRATION_DATABASE_URL`, never Vercel).
 - [ ] **Enable the before-user-created hook on `prod` too**, same steps as `dev`.
 - [ ] Do not set the Supabase env vars in Production until this hook is enabled on `prod`. At the same
   time set the email code expiry to 10 minutes or less (Authentication -> Providers -> Email).
