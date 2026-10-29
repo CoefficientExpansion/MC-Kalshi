@@ -51,3 +51,10 @@ describe("clampProbability", () => {
     );
   });
 });
+
+describe("clampProbability error message", () => {
+  it("rejects a null-prototype object with a RangeError, not a TypeError", () => {
+    expect(() => clampProbability(Object.create(null) as never)).toThrow(RangeError);
+    expect(() => clampProbability(Symbol("p") as never)).toThrow(RangeError);
+  });
+});

@@ -14,8 +14,9 @@ coverage/
 .env.*
 !.env.example
 
-# Claude Code personal settings
+# Claude Code personal settings and agent worktrees
 .claude/settings.local.json
+.claude/worktrees/
 
 # OS / editor
 .DS_Store

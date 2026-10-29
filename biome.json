@@ -6,7 +6,15 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!rea", "!tools", "!**/.next", "!**/drizzle/meta", "!**/*.md"],
+    "includes": [
+      "**",
+      "!.claude/worktrees",
+      "!rea",
+      "!tools",
+      "!**/.next",
+      "!**/drizzle/meta",
+      "!**/*.md"
+    ],
     "ignoreUnknown": true
   },
   "formatter": {
