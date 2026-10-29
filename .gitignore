@@ -22,3 +22,7 @@ coverage/
 Thumbs.db
 .vscode/
 .idea/
+
+# Next.js / Vercel generated
+next-env.d.ts
+.vercel/

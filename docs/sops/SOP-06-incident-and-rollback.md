@@ -9,7 +9,7 @@
 
 ## Steps (P1/P2)
 1. **Freeze**: set the `TRADING_PAUSED=true` env flag in Vercel (the `placeTrade` action refuses while set) and, if needed, roll back to the previous Vercel deployment.
-2. **Capture**: copy the error, affected market/user IDs, timestamps, and the last deploy ID into `docs/incidents/YYYY-MM-DD-<slug>.md`.
+2. **Capture**: copy the error, affected market IDs, timestamps, and the last deploy ID into `docs/incidents/YYYY-MM-DD-<slug>.md`. The repo is public: refer to people only by opaque user IDs, never by email or display name, and keep screenshots out.
 3. **Diagnose**: `debugging-and-error-recovery` skill; reproduce on `dev` with a copy of the relevant rows, never on prod.
 4. **Repair data** only through ledger entries with reason `admin_adjustment` and a note referencing the incident file. Never UPDATE `balances` or `ledger_entries` by hand.
 5. **Fix forward** via SOP-02 with a regression test that fails before the fix.
