@@ -10,6 +10,7 @@ import {
   ensureProfile,
   getSignupBonusPoints,
   loadMember,
+  loadProfileMember,
   ProfileError,
   parseSignupBonus,
 } from "./profiles";
@@ -212,5 +213,47 @@ describe("loadMember", () => {
       .insert(profiles)
       .values({ id: id(3), email: "c@my.maryvillecollege.edu", displayName: "c" });
     expect((await loadMember(db, id(3)))?.points).toBe(0);
+  });
+});
+
+describe("loadProfileMember", () => {
+  let db: AnyDb;
+  let close: () => Promise<void>;
+
+  beforeAll(async () => {
+    ({ db, close } = await openTestDb());
+  });
+  afterAll(async () => {
+    await close();
+  });
+
+  it("returns the member and suspended: false for an active profile", async () => {
+    await ensureProfile(db, { id: id(1), email: "a@my.maryvillecollege.edu" }, 1234);
+    expect(await loadProfileMember(db, id(1))).toEqual({
+      member: {
+        id: id(1),
+        email: "a@my.maryvillecollege.edu",
+        displayName: "a",
+        role: "member",
+        points: 1234,
+      },
+      suspended: false,
+    });
+  });
+
+  it("returns the member with suspended: true for a suspended profile", async () => {
+    await ensureProfile(db, { id: id(2), email: "b@my.maryvillecollege.edu" }, 10);
+    await db
+      .update(profiles)
+      .set({ suspendedAt: new Date() })
+      .where(eq(profiles.id, id(2)));
+    expect(await loadProfileMember(db, id(2))).toMatchObject({
+      member: { id: id(2), points: 10 },
+      suspended: true,
+    });
+  });
+
+  it("returns null for an unknown user", async () => {
+    expect(await loadProfileMember(db, id(99))).toBeNull();
   });
 });
