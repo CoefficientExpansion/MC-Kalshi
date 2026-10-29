@@ -400,7 +400,9 @@ describe.skipIf(!HAS_PG)("real Postgres: concurrent placeTrade", () => {
       const kinds = [
         { side: "YES", mode: "buy_points", amount: 10, expectedAvgPrice: 55 },
         { side: "NO", mode: "buy_points", amount: 10, expectedAvgPrice: 45 },
-        { side: "YES", mode: "sell_contracts", amount: 2, expectedAvgPrice: 55 },
+        // Each user holds about 0.2 YES from the 10-point seed buy (10 points buy slightly under 0.2
+        // contracts), and each sell lands on a different user, so 0.1 always stays within holdings.
+        { side: "YES", mode: "sell_contracts", amount: 0.1, expectedAvgPrice: 55 },
         { side: "NO", mode: "buy_points", amount: 10, expectedAvgPrice: 45 },
       ];
       const calls = Array.from({ length: 20 }, (_, k) => {
