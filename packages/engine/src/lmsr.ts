@@ -39,13 +39,16 @@ function assertSide(side: Side): void {
 
 /** Throws `RangeError` unless `b` is positive and finite and both q are finite. */
 export function assertState(state: MarketState): void {
-  if (!Number.isFinite(state.b) || state.b <= 0) {
-    throw new RangeError(`b must be a positive finite number, got ${state.b}`);
-  }
+  // Every quote validates b, not just new markets: a corrupt row with a huge b would otherwise
+  // make the budget step-down loop crawl one micro-contract at a time.
+  validateLiquidity(state.b);
   if (!Number.isFinite(state.qYes) || !Number.isFinite(state.qNo)) {
     throw new RangeError(`q must be finite, got qYes=${state.qYes}, qNo=${state.qNo}`);
   }
 }
+
+/** Largest |micro-contracts| the engine accepts: 2^51 (~2.25e9 contracts); the micro round trip first breaks near 4.29e15. */
+const MAX_MICRO = 2 ** 51;
 
 /** Convert contracts to integer micro-contracts (rounds to the nearest micro-contract). */
 export function toMicro(contracts: number): number {
@@ -53,7 +56,8 @@ export function toMicro(contracts: number): number {
     throw new RangeError(`contracts must be finite, got ${contracts}`);
   }
   const micro = Math.round(contracts * MICRO_PER_CONTRACT);
-  if (!Number.isSafeInteger(micro)) {
+  // Near 4.29e15 micro-contracts fromMicro → toMicro stops being exact; 2^51 keeps a margin.
+  if (!Number.isSafeInteger(micro) || Math.abs(micro) > MAX_MICRO) {
     throw new RangeError(`contract amount ${contracts} is too large`);
   }
   return micro;

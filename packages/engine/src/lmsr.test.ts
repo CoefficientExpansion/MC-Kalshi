@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
+  assertState,
   costFunction,
   DEFAULT_LIQUIDITY,
   displayPrice,
@@ -326,5 +327,22 @@ describe("maxPoolLoss", () => {
 
   it("rejects an invalid b", () => {
     expect(() => maxPoolLoss(0)).toThrow(RangeError);
+  });
+});
+
+describe("hardening from the M1 adversarial review", () => {
+  it("assertState rejects b outside the supported liquidity range (a corrupt row must not hang a quote)", () => {
+    for (const b of [1, 49.9, 500.1, 1e20]) {
+      expect(() => assertState({ b, qYes: 0, qNo: 0 })).toThrow(RangeError);
+    }
+    expect(() => assertState({ b: LIQUIDITY_MIN, qYes: 0, qNo: 0 })).not.toThrow();
+    expect(() => assertState({ b: LIQUIDITY_MAX, qYes: 0, qNo: 0 })).not.toThrow();
+  });
+
+  it("toMicro rejects amounts above 2^51 micro-contracts, below where a micro round trip stops being exact", () => {
+    expect(toMicro(2 ** 51 / 1e6)).toBe(2 ** 51);
+    expect(() => toMicro(2 ** 51 / 1e6 + 1)).toThrow(RangeError);
+    expect(() => toMicro(4_295_273_075.393417)).toThrow(RangeError);
+    expect(() => toMicro(-4_295_273_075.393417)).toThrow(RangeError);
   });
 });

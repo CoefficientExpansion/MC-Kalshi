@@ -53,6 +53,13 @@ export function applyFill(position: Position, fill: Fill): Position {
   if (!Number.isSafeInteger(fill.costPoints)) {
     throw new RangeError(`costPoints must be a whole number, got ${fill.costPoints}`);
   }
+  // A fill not built by a quote must still not hand out free contracts: buys cost at least 1
+  // point, sells never charge the user.
+  if (delta > 0 ? fill.costPoints < 1 : fill.costPoints > 0) {
+    throw new RangeError(
+      `costPoints ${fill.costPoints} has the wrong sign for ${delta > 0 ? "a buy" : "a sell"}`,
+    );
+  }
   const held = fill.side === "YES" ? position.contractsYes : position.contractsNo;
   const updatedMicro = toMicro(held) + delta;
   if (updatedMicro < 0) {

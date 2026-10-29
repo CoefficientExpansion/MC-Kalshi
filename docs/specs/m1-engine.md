@@ -1,5 +1,5 @@
 # M1 — LMSR market engine
-Status: in-progress · Milestone: M1 · Research: docs/research/kalshi/order-ticket.md · ADRs: 0001, 0002
+Status: done · Milestone: M1 · Research: docs/research/kalshi/order-ticket.md · ADRs: 0001, 0002
 
 ## Problem
 Every later milestone (ticket quotes, `placeTrade`, resolution, void) needs one trusted
@@ -68,12 +68,37 @@ None directly. The order ticket (M3) shows `avgPrice`, `payoutIfWin`, `probAfter
 5. Re-export from `index.ts`; docs updated — verify by: `npm run typecheck && npm run lint && npm test` green.
 6. Adversarial review of rounding and invariants (doubt-driven) — findings fixed or recorded below.
 
+## Review (task 6): adversarial pass, 2026-10-29
+An independent agent tried to break the engine: ~180k quotes checked against a 120-digit
+Decimal reference, ~2.4M single-user and ~900k multi-user random trades (round-trip and
+both-sides arbitrage, dust vs whale, extreme states), 200k-trade drift, 1.2M garbage inputs,
+and 25 mutants. **No pool leak and no invariant violation.** Pool loss peaked at 99.994 % of
+`100·b·ln 2`; voids refunded exactly; q stayed an exact multiple of 1e-6.
+
+Fixed (with regression tests):
+- `assertState` now enforces `b` in 50–500 on every quote. A corrupt row with `b ≈ 1e20` made the
+  budget step-down loop crawl one micro-contract at a time.
+- `applyFill` rejects a buy costing < 1 point and a sell that charges the user, so a fill not
+  built by a quote cannot hand out free contracts.
+- `toMicro` rejects |amount| > 2^51 micro-contracts (~2.25e9 contracts). The micro round trip
+  stops being exact near 4.29e15.
+
+Accepted, not fixed:
+- Float error can make a buy's `ceil` land 1 point low when the true cost is within ~1e-11 of an
+  integer (10 in 120k trials, budgets ≥ 1.7M points). The real shortfall is ~1e-11 points, not
+  exploitable; an epsilon would distort exact-integer budgets.
+- Dust trades: a 1e-6-contract buy costs 1 point (`avgPrice` 1,000,000). M3's ticket and
+  `placeTrade` should enforce a minimum trade size.
+- Two mutants (sell ×1.0000001, buy −1e-6 point bias) survive: the suite has no
+  high-precision reference test. Worth adding a BigInt/Decimal cross-check if the math changes.
+
 ## Definition of Done
-- [ ] Acceptance criteria met and demonstrated (test or screenshot)
-- [ ] Unit tests for logic; Playwright for any user-visible flow that moves points (none in M1)
-- [ ] `npm run typecheck && npm run lint && npm test` green locally and in CI
-- [ ] No secrets in code; new env vars documented in `.env.example` (none)
-- [ ] Docs or ADR updated when behavior or a decision changed
-- [ ] Preview deploy checked by a human (no UI change in M1)
+- [x] Acceptance criteria met and demonstrated (test or screenshot)
+- [x] Unit tests for logic; Playwright for any user-visible flow that moves points (none in M1)
+- [x] `npm run typecheck && npm run lint && npm test` green locally (CI: confirm on the branch)
+- [x] No secrets in code; new env vars documented in `.env.example` (none)
+- [x] Docs or ADR updated when behavior or a decision changed
+- [x] Preview deploy checked by a human (n/a: no UI change in M1)
 
 ## Next
+Merge the branch to `main` (squash). M3 must add a minimum trade size (see Review).

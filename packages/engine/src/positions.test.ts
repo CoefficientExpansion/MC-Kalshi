@@ -354,3 +354,19 @@ describe("simulated markets", () => {
     expect(sim.market.qNo).toBeGreaterThan(0);
   });
 });
+
+describe("applyFill sign checks (M1 adversarial review)", () => {
+  it("rejects a buy that costs less than 1 point and a sell that charges the user", () => {
+    expect(() => applyFill(EMPTY_POSITION, { side: "YES", contracts: 100, costPoints: 0 })).toThrow(
+      RangeError,
+    );
+    expect(() => applyFill(EMPTY_POSITION, { side: "NO", contracts: 1, costPoints: -5 })).toThrow(
+      RangeError,
+    );
+    const held = applyFill(EMPTY_POSITION, { side: "YES", contracts: 2, costPoints: 101 });
+    expect(() => applyFill(held, { side: "YES", contracts: -1, costPoints: 3 })).toThrow(
+      RangeError,
+    );
+    expect(applyFill(held, { side: "YES", contracts: -1, costPoints: 0 }).contractsYes).toBe(1);
+  });
+});
