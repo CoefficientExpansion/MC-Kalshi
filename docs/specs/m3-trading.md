@@ -1,5 +1,5 @@
 # M3 — Trading: placeTrade, order ticket, positions, price chart, invariant job
-Status: draft · Milestone: M3 · Research: docs/research/kalshi/order-ticket.md, docs/research/kalshi/market-page.md · ADRs: 0001, 0002
+Status: in-progress (2026-10-29) · Milestone: M3 · Research: docs/research/kalshi/order-ticket.md, docs/research/kalshi/market-page.md · ADRs: 0001, 0002
 
 ## Problem
 Markets are readable (M2) but nobody can trade. M3 makes points move: a signed-in member buys or
@@ -345,6 +345,22 @@ Parallel chunks A–D start after task 0. Each chunk can go to a separate implem
 **E. Integration (last)**
 12. E2E auth via the service role / admin API (fallback: test-session route with `isE2EAuthEnabled` + guard tests), Playwright config, trade-loop spec, CI `e2e` job. Verify by: e2e green in CI; with `VERCEL=1` the test route returns 404.
 13. Adversarial review (doubt-driven) of `placeTrade`; `/security-review`; confirm `docs/architecture.md` §6/§9 (balances lock, idempotency order, balance floor) still match the code; SOP-06 invariant-alert steps. Verify by: findings fixed or recorded here.
+
+## Execution plan (orchestrator, 2026-10-29)
+
+Built on branch `feat/m3-trading` in waves; each implementer works in its own git worktree and branch, and the orchestrator merges, runs the gate, and reviews between waves. Merge to `main` waits for the owner's confirmation of the two assumptions below.
+
+Assumptions (recommended defaults from this spec, owner to confirm before merge to `main`):
+1. Balance floor: `CHECK (points >= 0)` on `balances` ships in this slice; for M4 voids, a `void_refund` debit larger than a user's balance is covered by a separate house → user entry (architecture §6 "Balance floor").
+2. Per-trade cap `min(5000, 50·b)` points and slippage choices 1 / 2 / 5 points as proposed.
+3. E2E authentication uses the guarded test-session route (the fallback above): CI has no Supabase project or service-role secret.
+4. App database role: a migration creates a `NOLOGIN` role `mc_app` with the minimum grants (no UPDATE/DELETE/TRUNCATE on `ledger_entries` or `trades`); migrations use `MIGRATION_DATABASE_URL` (owner) when set, else `DATABASE_URL`. The owner enables login for `mc_app` and points `DATABASE_URL` at it (new owner step); until then the app keeps working as today. Recorded in ADR-0006.
+
+Waves:
+- **Wave 1** (parallel): (a) database hardening and the M2-review test items: migrations for REVOKE + default privileges, indexes, the `markets` outcome/status CHECK, the `balances` floor, `trades.request_fingerprint`, the `trades(user_id, created_at)` index, the `mc_app` role and ADR-0006; RLS-by-role, unique-index and real-Postgres concurrency tests for `grantSignupBonus` and `postTransfer`; journal-length migration test; no test-order coupling; ledger and profiles suites in the CI Postgres job. (b) Task 0 and task 1 (contract types, trade limits, numeric boundary, `server/quote.ts` adapter, size rules) plus `server-only` imports, the production `DATABASE_CA_CERT` guard and `adaptSupabaseAuth` tests.
+- **Wave 2** (parallel): tasks 2–4 (`placeTrade`, property test, action, rate limit, pause switch, state endpoint); tasks 5–6 (ticket quote, copy, order ticket against the types); task 9–10 (`checkTradingInvariants`, cron route).
+- **Wave 3** (parallel): tasks 7–8 (portfolio, price history, chart, position card); task 11 (concurrency suite); wiring the ticket to the real action.
+- **Wave 4**: task 12 (e2e and CI job), task 13 (adversarial review of `placeTrade`, security review), ship.
 
 ## Definition of Done
 - [ ] Acceptance criteria met and demonstrated (test or screenshot)

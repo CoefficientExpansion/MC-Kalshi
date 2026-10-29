@@ -10,7 +10,7 @@ the header: `draft` → `in-progress` → `done` (or `dropped`).
 | [m2a-data-layer.md](m2a-data-layer.md) | M2 (part a) | done (human preview check pending) |
 | [m2b-market-pages.md](m2b-market-pages.md) | M2 (part b, UI) | done (human preview check pending) |
 | [m2b-auth.md](m2b-auth.md) | M2 (part b, auth) | done in code; live Supabase check pending |
-| [m3-trading.md](m3-trading.md) | M3 | draft |
+| [m3-trading.md](m3-trading.md) | M3 | in-progress |
 | [../design/theme.md](../design/theme.md) | cross-cutting | done |
 
 ## Template
