@@ -158,7 +158,7 @@ export const trades = pgTable(
     probAfter: doublePrecision("prob_after").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     /** Hash of the normalized request, so a replayed idempotency key can be compared in full. */
-    requestFingerprint: text("request_fingerprint"),
+    requestFingerprint: text("request_fingerprint").notNull(),
     createdAt: timestamptz("created_at").notNull().defaultNow(),
   },
   (t) => [

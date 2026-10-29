@@ -43,6 +43,13 @@
       "when": 1793305251910,
       "tag": "0005_app_role",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793313248922,
+      "tag": "0006_trades_fingerprint_not_null",
+      "breakpoints": true
     }
   ]
 }

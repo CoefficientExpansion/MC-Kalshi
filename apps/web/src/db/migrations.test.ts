@@ -67,6 +67,7 @@ async function seeded(): Promise<{ h: TestDbHandle; marketId: string }> {
     probBefore: 0.5,
     probAfter: 0.51,
     idempotencyKey: "k",
+    requestFingerprint: "f",
   });
   return { h, marketId: market?.id ?? "" };
 }
@@ -201,12 +202,12 @@ describe("hardening and trading migrations: indexes, CHECKs, columns", () => {
     expect(error.message).toContain("balances_points_nonnegative");
   });
 
-  it("adds a nullable text trades.request_fingerprint", async () => {
+  it("makes trades.request_fingerprint a NOT NULL text column", async () => {
     expect(
       await h.rows(
         sql`select data_type, is_nullable from information_schema.columns
             where table_schema = 'public' and table_name = 'trades' and column_name = 'request_fingerprint'`,
       ),
-    ).toEqual([{ data_type: "text", is_nullable: "YES" }]);
+    ).toEqual([{ data_type: "text", is_nullable: "NO" }]);
   });
 });

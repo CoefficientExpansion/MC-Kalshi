@@ -52,6 +52,7 @@ async function fill(db: AnyDb, f: Fill): Promise<string> {
       probBefore: 0.5,
       probAfter: 0.5,
       idempotencyKey: `fixture-key-${String(++keySeq).padStart(8, "0")}`,
+      requestFingerprint: "fixture",
     })
     .returning({ id: trades.id });
   const col = f.side === "YES" ? "contracts_yes" : "contracts_no";
@@ -234,6 +235,7 @@ describe("checkTradingInvariants", () => {
         probBefore: 0.5,
         probAfter: 0.5,
         idempotencyKey: "corrupt-trade-0001",
+        requestFingerprint: "fixture",
       })
       .returning({ id: trades.id });
     expect(t).toBeDefined();

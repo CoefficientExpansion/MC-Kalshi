@@ -61,6 +61,7 @@ async function seed(db: AnyDb): Promise<string> {
     probBefore: 0.5,
     probAfter: 0.51,
     idempotencyKey: "k",
+    requestFingerprint: "f",
   });
   return marketId;
 }
@@ -116,8 +117,8 @@ describe("mc_app, the app's runtime role", () => {
       await attemptAs(
         h.db,
         "mc_app",
-        sql`insert into trades (market_id, user_id, side, contracts, cost_points, prob_before, prob_after, idempotency_key)
-            values (${marketId}, ${userA}, 'NO', 2, 30, 0.5, 0.4, 'k2')`,
+        sql`insert into trades (market_id, user_id, side, contracts, cost_points, prob_before, prob_after, idempotency_key, request_fingerprint)
+            values (${marketId}, ${userA}, 'NO', 2, 30, 0.5, 0.4, 'k2', 'f')`,
       ),
     ).toBeUndefined();
     expect(

@@ -72,26 +72,37 @@ const INVALID: ParseTradeInputResult = { ok: false, code: "invalid_input" };
 
 /**
  * Validates untrusted input (a server action argument) into a {@link ParsedTradeInput}. Pure;
- * never throws, even for a hostile object whose getters throw.
+ * never throws: any throw while inspecting the input (a revoked Proxy, a throwing getter or
+ * trap) is `invalid_input`. Each field is read exactly once, so a getter that changes its answer
+ * cannot pass validation with one value and be used with another.
  */
 export function parseTradeInput(raw: unknown): ParseTradeInputResult {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return INVALID;
-  let fields: Record<string, unknown>;
   try {
-    const r = raw as Record<string, unknown>;
-    fields = {
-      marketId: r.marketId,
-      side: r.side,
-      mode: r.mode,
-      amount: r.amount,
-      expectedAvgPrice: r.expectedAvgPrice,
-      maxSlippage: r.maxSlippage,
-      idempotencyKey: r.idempotencyKey,
-      expectedCostPoints: r.expectedCostPoints,
-    };
+    return parseFields(readFields(raw));
   } catch {
     return INVALID;
   }
+}
+
+/** One read of each known field, or null for a non-object. May throw on a hostile object. */
+function readFields(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  return {
+    marketId: r.marketId,
+    side: r.side,
+    mode: r.mode,
+    amount: r.amount,
+    expectedAvgPrice: r.expectedAvgPrice,
+    maxSlippage: r.maxSlippage,
+    idempotencyKey: r.idempotencyKey,
+    expectedCostPoints: r.expectedCostPoints,
+  };
+}
+
+/** Validates plain values already read off the input. */
+function parseFields(fields: Record<string, unknown> | null): ParseTradeInputResult {
+  if (!fields) return INVALID;
   const { marketId, side, mode, amount, expectedAvgPrice, idempotencyKey, expectedCostPoints } =
     fields;
   const maxSlippage = fields.maxSlippage === undefined ? DEFAULT_MAX_SLIPPAGE : fields.maxSlippage;
