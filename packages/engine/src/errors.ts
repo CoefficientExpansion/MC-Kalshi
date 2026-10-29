@@ -43,8 +43,8 @@ export function describe(value: unknown): string {
   }
 }
 
-/** Reads `keys` off `value`; a getter that throws (e.g. a hostile Proxy) becomes `code`. */
-function readFields<K extends string>(
+/** Reads `keys` off `value`; a getter that throws (e.g. a hostile Proxy) becomes INVALID_STATE. */
+export function readFields<K extends string>(
   value: object,
   keys: readonly K[],
   what: string,

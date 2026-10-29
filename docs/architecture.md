@@ -167,18 +167,40 @@ payout if YES = 976 points (the engine's property suite pins these numbers).
 **Sign-in.** Email one-time code via Supabase Auth. A server-side `before-user-created`
 auth hook rejects any address not ending in `@maryvillecollege.edu` or
 `@my.maryvillecollege.edu` (students use the `my.` subdomain). First sign-in creates the
-`profiles` row and posts the `signup_bonus` ledger entry.
+`profiles` row and posts the `signup_bonus` ledger entry. The hook is the guard; the app
+re-checks the domain as a second layer. The hook only fires once enabled in the Supabase
+dashboard, **per environment** (`dev` and `prod`); until then non-college addresses can create
+`auth.users` rows and trigger code emails, but never get a profile or points. The hook does
+not fire on email changes, so `getCurrentUser()` re-checks: a session whose email is no longer
+allowed, or differs from the profile's, is treated as signed out.
 
 **Trade.** Server action `placeTrade({ marketId, side, points | contracts, maxSlippage, idempotencyKey })`:
 1. `BEGIN`; `SELECT … FROM markets WHERE id = $1 FOR UPDATE` (serializes trades per market).
+   Then lock the user's `balances` row `FOR UPDATE`. **Lock order is always market, then
+   balances**, so a user trading two markets at once cannot overdraw and cannot deadlock.
 2. Reject unless `status = 'open'` and `now() < close_at`.
 3. Engine quote from current `q`; check slippage; check `balances.points ≥ cost`.
 4. Insert `trades`; upsert `positions`; update `markets.q_*`; insert two `ledger_entries`
    (user −cost, market_pool +cost); update `balances`; insert `price_snapshots`. `COMMIT`.
-5. A duplicate `idempotency_key` returns the original trade (safe retries).
+5. **Idempotency.** The key is unique per `(user_id, idempotency_key)`, but the lock is per
+   market, so the insert is `INSERT … ON CONFLICT DO NOTHING` followed by a re-read. A replay
+   must match the full original input (market, side, mode, amount, expected price and
+   slippage) and then returns the original trade with `replayed: true`; a key reused with
+   different input returns `idempotency_key_reused`. A replay never re-validates market status,
+   balance or slippage.
+
+**Balance floor** (proposed, owner to confirm). Today nothing enforces `balances.points ≥ 0`
+below the app. Recommend: M3 adds `CHECK (points >= 0)` on `balances` together with
+`placeTrade`'s balance check (defense in depth). For M4 voids, `void_refund` is a debit for a
+user who sold at a profit and can exceed their balance; recommend the house absorbs the
+shortfall via a separate house → user entry, so the ledger still sums to zero and no balance
+goes negative. Settle both before the CHECK ships, since a failing void would otherwise abort
+the whole transaction.
 
 **Close.** A cron route (every minute) flips `open → closed` where `close_at` has passed.
-`placeTrade` also checks `close_at`, so the cron is a convenience, not the guard.
+`placeTrade` also checks `close_at`, so the cron is a convenience, not the guard. Vercel Hobby
+is believed to allow daily crons only: an every-minute schedule needs Pro or a GitHub Actions
+`schedule` (open decision, `docs/owner-todos.md`; settle before M4).
 
 **Resolve.** Moderator action with `outcome` and `resolution_source`. In one transaction:
 set status and credit each position `winning_contracts × 100` points (`payout`, from
@@ -195,12 +217,12 @@ status `voided`. For ambiguous rules or cancelled events.
 |---|---|---|
 | `profiles` | `id` (= `auth.users.id`), `email`, `display_name`, `role` (member / moderator / admin), `suspended_at`, `leaderboard_opt_out`, `created_at` | Created on first sign-in; suspension and removal rules in SOP-08 |
 | `settings` | `key`, `value`, `updated_by`, `updated_at` | Economy knobs: signup bonus, weekly stipend, balance cap, default `b` (SOP-08 §5); env vars until M5 |
-| `balances` | `user_id`, `points` | Cache; must equal the ledger sum |
+| `balances` | `user_id`, `points` | Cache; must equal the ledger sum. `CHECK (points >= 0)` proposed for M3 (§6 Balance floor) |
 | `categories` | `id`, `slug`, `name` | Athletics, Campus Life, Academics, Weather, … |
 | `markets` | §4 columns plus `slug`, `created_at`, `opened_at`, `closed_at`, `resolved_at`, `finalized_at` | `CHECK` on status; index `(status, close_at)` |
 | `trades` | `id`, `market_id`, `user_id`, `side`, `contracts`, `cost_points`, `prob_before`, `prob_after`, `idempotency_key`, `created_at` | Immutable; unique `(user_id, idempotency_key)` |
 | `positions` | `market_id`, `user_id`, `contracts_yes`, `contracts_no`, `cost_basis_points` | PK `(market_id, user_id)` |
-| `ledger_entries` | `id`, `account_type`, `account_id`, `delta_points`, `reason`, `ref_type`, `ref_id`, `created_at` | Append-only: app role has no UPDATE/DELETE grant |
+| `ledger_entries` | `id`, `account_type`, `account_id`, `delta_points`, `reason`, `ref_type`, `ref_id`, `created_at` | Append-only: triggers block UPDATE/DELETE/TRUNCATE, even for the owner role |
 | `disputes` | `id`, `market_id`, `user_id`, `reason`, `status`, `decided_by`, `decision_note` | |
 | `audit_log` | `id`, `actor_id`, `action`, `target_type`, `target_id`, `payload`, `created_at` | Every moderator/admin action |
 | `price_snapshots` | `market_id`, `at`, `prob_yes` | Written on every trade; feeds the chart |
@@ -222,7 +244,8 @@ Security is on with deny-all policies so the public anon key can never read tabl
 - Domain allowlist enforced at the auth layer, not the UI.
 - No client-trusted numbers: the client sends intent (side, amount, slippage); the server recomputes everything.
 - Per-market `FOR UPDATE` lock; idempotency keys; `CHECK` constraints on status transitions.
-- Ledger append-only at the grant level; scheduled invariant job (`SUM = 0`, `balances = ledger`).
+- Ledger append-only enforced in the database: `BEFORE UPDATE/DELETE/TRUNCATE` triggers on `ledger_entries` and `trades` raise, and bind the table owner too (grants alone would not). RLS is deny-all on every table. Scheduled invariant job (`SUM = 0`, `balances = ledger`).
+- DB connections use TLS. Set `DATABASE_CA_CERT` (Supabase CA PEM, Project Settings → Database → SSL) to verify the server certificate; unset, the connection is encrypted but unverified (local and CI).
 - Rate limits: trades per user per minute, proposals per user per day.
 - Moderator/admin actions check the role server-side and write `audit_log`.
 - Secrets only in Vercel/Supabase env; `.env.local` gitignored; `.env.example` documents every variable.
