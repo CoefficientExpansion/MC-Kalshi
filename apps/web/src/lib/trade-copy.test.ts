@@ -25,10 +25,6 @@ import {
   tradeErrorMessage,
 } from "./trade-copy";
 
-/**
- * Source text with the two code uses of "$" removed: template placeholders (`${x}`) and regex
- * end anchors (`$/`). Every other "$", and every banned word, counts.
- */
 /** The user-visible text of a source file (string literals and JSX text; see `sourceCopy`). */
 function scannable(path: string): string {
   return sourceCopy(readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8")).join("\n");

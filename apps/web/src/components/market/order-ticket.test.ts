@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { TICKET_BANNED, visibleText } from "@/lib/copy-guard";
+import { orderFromRequote, outcomeOf } from "@/lib/ticket-order";
 import { buildTicketQuote } from "@/lib/ticket-quote";
 import { requoteRows } from "@/lib/trade-copy";
 import type { MarketStateDto } from "@/server/trade-types";
@@ -236,6 +237,40 @@ describe("OrderTicketView states", () => {
     expect(text(html)).toContain("Avg price 54 pts (54% to break even)");
     expect(text(html)).toContain("Payout if YES 920 pts");
     expect(html).toMatch(/<button type="submit"[^>]*>Buy at 54 pts<\/button>/);
+  });
+
+  it("slippage on a sell: the server's signed requote shows positive proceeds and Sell at 48 pts", () => {
+    // placeTrade keeps the engine's signs: a sell's contracts and costPoints are negative.
+    const order = {
+      mode: "sell_contracts" as const,
+      side: "YES" as const,
+      amount: 1,
+      expectedAvgPrice: 51,
+      maxSlippage: 2,
+    };
+    const requote = {
+      avgPrice: 48,
+      contracts: -1,
+      costPoints: -48,
+      probAfter: 0.476,
+      payoutIfWin: 0,
+    };
+    const outcome = outcomeOf(
+      { ok: false, code: "slippage_exceeded", message: "the price moved", requote },
+      order,
+    );
+    if (outcome.kind !== "requote") throw new Error("expected a requote");
+    expect(orderFromRequote(order, outcome.requote)).toEqual({ ...order, expectedAvgPrice: 48 });
+    const html = view({
+      tab: "sell",
+      requoteRows: requoteRows(order, outcome.requote),
+      status: { kind: "requote", message: outcome.message, avgPrice: outcome.requote.avgPrice },
+    });
+    expect(text(html)).toContain("The price moved from 51 to 48 pts. Review the new price.");
+    expect(text(html)).toContain("Avg price 48 pts");
+    expect(text(html)).toContain("You receive 48 pts");
+    expect(text(html)).not.toMatch(/-\s?\d/);
+    expect(html).toMatch(/<button type="submit"[^>]*>Sell at 48 pts<\/button>/);
   });
 
   it("offers the 1 / 2 / 5 point tolerance with 2 selected", () => {
