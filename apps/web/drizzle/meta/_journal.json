@@ -22,6 +22,27 @@
       "when": 1793288510006,
       "tag": "0002_auth_signup_hook",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793305221437,
+      "tag": "0003_hardening",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793305242626,
+      "tag": "0004_trading_prerequisites",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793305251910,
+      "tag": "0005_app_role",
+      "breakpoints": true
     }
   ]
 }

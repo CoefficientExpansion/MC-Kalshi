@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { drizzle } from "drizzle-orm/postgres-js";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
@@ -17,6 +19,9 @@ import { categories, HOUSE_ACCOUNT_ID, ledgerEntries, markets, profiles, trades 
 
 const ADMIN_URL = process.env.TEST_DATABASE_URL;
 const MIGRATIONS_FOLDER = fileURLToPath(new URL("../../drizzle", import.meta.url));
+const JOURNAL_LENGTH: number = JSON.parse(
+  readFileSync(join(MIGRATIONS_FOLDER, "meta", "_journal.json"), "utf8"),
+).entries.length;
 
 type PgError = Error & { code?: string; cause?: { code?: string; message?: string } };
 
@@ -102,10 +107,10 @@ describe.skipIf(!ADMIN_URL)("real Postgres", () => {
 
   it("applied every migration to the fresh database", async () => {
     const [row] = await conn`select count(*)::int as n from drizzle.__drizzle_migrations`;
-    expect(row?.n).toBe(3);
+    expect(row?.n).toBe(JOURNAL_LENGTH);
   });
 
-  it("enables Row Level Security on every table in public, with no policies", async () => {
+  it("enables Row Level Security on every table in public; the only policies are for mc_app", async () => {
     const tables = await conn`
       select c.relname, c.relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'public' and c.relkind = 'r' order by 1`;
@@ -113,7 +118,9 @@ describe.skipIf(!ADMIN_URL)("real Postgres", () => {
     for (const t of tables) {
       expect(t.relrowsecurity, String(t.relname)).toBe(true);
     }
-    expect(await conn`select 1 from pg_policies where schemaname = 'public'`).toHaveLength(0);
+    const roles = await conn`
+      select distinct array_to_string(roles, ',') as roles from pg_policies where schemaname = 'public'`;
+    expect(roles.map((r) => r.roles)).toEqual(["mc_app"]);
   });
 
   it.each([
