@@ -25,7 +25,7 @@ Code is the primary implementer.
 - TDD is mandatory in `packages/engine` and in any server code that writes `ledger_entries`.
 - Git: trunk-based; branches `feat/<slug>`, `fix/<slug>`, `chore/<slug>`; Conventional Commits; squash-merge to `main`.
 - Commit messages and PR text carry NO Claude attribution (no `Co-Authored-By: Claude`, no "Generated with" line). A user hook blocks them.
-- Do not commit or push unless asked. When asked to push `main`, push to both remotes: `origin` (source of truth) and `deploy` (the fork Vercel builds from); see SOP-07 "Current state".
+- Do not commit or push unless asked. `git push origin` updates both repositories: `origin` has two push URLs, the source of truth `M4-on-Github/MC-Kalshi` and the fork `CoefficientExpansion/MC-Kalshi` that Vercel builds from (SOP-07 "Current state"). If the fork half is rejected, sync the fork with GitHub's "Sync fork" button.
 - `rea/` is a tool checkout (REA reverse-engineering source), not product code. It is gitignored. Do not edit it.
 - Secrets live in `.env.local` (gitignored); never print them.
 
