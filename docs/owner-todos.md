@@ -75,7 +75,11 @@ and delete a line once it is done. Last updated 2026-10-29 (after the engine dec
 - Deployment Protection does not block students: `https://mc-kalshi.vercel.app` answered HTTP 200 without
   login (curl, 2026-10-29); only preview URLs answer 302 to Vercel Authentication.
 - [ ] Decide whether previews should stay protected.
-- [ ] Hobby cron limits: see the Decisions item. Nothing to configure until M3 adds `vercel.json`.
+- [ ] Hobby cron limits: see the Decisions item. M3's `apps/web/vercel.json` schedules only the
+  daily ledger invariant check (09:00 UTC), which Hobby allows.
+- [ ] Set `CRON_SECRET` in Vercel (Production and Preview): generate it with `openssl rand -hex 32`,
+  a different value per environment. Vercel Cron sends it as the bearer token; without it the
+  invariant route answers 401 and the cron run shows as failed.
 - [ ] Look once at the production page in a browser after the next deploy (human preview check).
 
 ## GitHub
