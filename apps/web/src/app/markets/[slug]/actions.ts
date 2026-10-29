@@ -1,6 +1,6 @@
 "use server";
 
-import { getDb } from "@/db";
+import { getDbChecked } from "@/db";
 import { getSessionMember } from "@/server/auth";
 import type { TradeResult } from "@/server/trade-types";
 import { placeTrade } from "@/server/trading";
@@ -15,7 +15,8 @@ export async function placeTradeAction(input: unknown): Promise<TradeResult> {
   if (!session) {
     return { ok: false, code: "unauthenticated", message: "sign in to trade" };
   }
-  const db = getDb();
+  // A failed connection check reads as unavailable, like an unconfigured database.
+  const db = await getDbChecked().catch(() => undefined);
   if (!db) {
     return { ok: false, code: "internal_error", message: "trading is not available right now" };
   }

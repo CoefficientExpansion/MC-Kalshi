@@ -4,9 +4,15 @@ import { categories, markets } from "@/db/schema";
 import { openTestDb, type TestDbHandle } from "@/db/test-db";
 import { GET } from "./route";
 
-// `getDb()` is swapped per test: undefined = no DATABASE_URL, otherwise a PGlite database.
+// `getDbChecked()` is swapped per test: undefined = no DATABASE_URL, otherwise a PGlite database.
 const holder = vi.hoisted(() => ({ db: undefined as unknown }));
-vi.mock("@/db", () => ({ getDb: () => holder.db }));
+// An Error stands for a failed connection check (getDbChecked throws).
+vi.mock("@/db", () => ({
+  getDbChecked: async () => {
+    if (holder.db instanceof Error) throw holder.db;
+    return holder.db;
+  },
+}));
 
 const SECRET = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 const MARKET = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -85,6 +91,14 @@ describe("GET /api/cron/ledger-invariants", () => {
     const res = await call(`Bearer ${SECRET}`);
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ code: "unconfigured" });
+  });
+
+  it("is 500 check_failed when the connection check fails", async () => {
+    holder.db = new Error("connect timeout postgres://secret@host");
+    const res = await call(`Bearer ${SECRET}`);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ ok: false, code: "check_failed" });
+    expect(String(errorSpy.mock.calls[0]?.[0])).not.toContain("secret");
   });
 
   it("is 200 with ok and checkedAt when every invariant holds", async () => {

@@ -11,8 +11,16 @@ const mocks = vi.hoisted(() => ({
   claims: { sub: "s", email: "e" } as unknown,
   session: null as unknown,
   throws: false,
+  /** What getDbChecked does: pass the connection on, refuse it (role guard), or throw. */
+  check: "pass" as "pass" | "refused" | "throws",
 }));
-vi.mock("@/db", () => ({ getDb: () => mocks.db }));
+vi.mock("@/db", () => ({
+  getDb: () => mocks.db,
+  getDbChecked: async () => {
+    if (mocks.check === "throws") throw new Error("connect timeout postgres://secret@host");
+    return mocks.check === "refused" ? undefined : mocks.db;
+  },
+}));
 vi.mock("@/lib/supabase/config", () => ({
   getSupabaseConfig: () => (mocks.configured ? { url: "u", key: "k" } : undefined),
 }));
@@ -51,6 +59,7 @@ beforeEach(() => {
   mocks.configured = true;
   mocks.session = null;
   mocks.throws = false;
+  mocks.check = "pass";
 });
 
 describe("getSessionMember and getCurrentUser", () => {
@@ -89,6 +98,23 @@ describe("getSessionMember and getCurrentUser", () => {
     mocks.throws = true;
     expect(await getSessionMember()).toBeNull();
     expect(await getCurrentUser()).toBeNull();
+    spy.mockRestore();
+  });
+
+  it("both return null when the production role guard refuses the connection", async () => {
+    mocks.session = session(false);
+    mocks.check = "refused";
+    expect(await getSessionMember()).toBeNull();
+    expect(await getCurrentUser()).toBeNull();
+  });
+
+  it("both return null, without throwing, when the connection check fails", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.session = session(false);
+    mocks.check = "throws";
+    expect(await getSessionMember()).toBeNull();
+    expect(await getCurrentUser()).toBeNull();
+    expect(spy.mock.calls.flat().join(" ")).not.toContain("secret");
     spy.mockRestore();
   });
 });

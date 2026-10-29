@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { getDb } from "@/db";
+import { getDbChecked } from "@/db";
 import { getAllowedDomains, isAllowedEmail, normalizeEmail } from "@/server/auth-email";
 import {
   E2E_SESSION_COOKIE,
@@ -42,7 +42,7 @@ export async function POST(request: Request): Promise<Response> {
   if (typeof raw !== "string" || !isAllowedEmail(raw, getAllowedDomains())) {
     return refuse(400, "not_allowed");
   }
-  const db = getDb();
+  const db = await getDbChecked().catch(() => undefined);
   if (!db) {
     return refuse(503, "unconfigured");
   }

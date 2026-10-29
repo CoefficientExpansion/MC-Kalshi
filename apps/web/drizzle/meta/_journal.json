@@ -50,6 +50,13 @@
       "when": 1793313248922,
       "tag": "0006_trades_fingerprint_not_null",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793316010473,
+      "tag": "0007_privilege_tightening",
+      "breakpoints": true
     }
   ]
 }

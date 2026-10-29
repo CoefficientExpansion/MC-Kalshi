@@ -6,7 +6,13 @@ const mocks = vi.hoisted(() => ({
   session: null as { userId: string; suspended: boolean } | null,
   placeTrade: vi.fn(),
 }));
-vi.mock("@/db", () => ({ getDb: () => mocks.db }));
+// An Error stands for a failed connection check (getDbChecked throws).
+vi.mock("@/db", () => ({
+  getDbChecked: async () => {
+    if (mocks.db instanceof Error) throw mocks.db;
+    return mocks.db;
+  },
+}));
 vi.mock("@/server/auth", () => ({ getSessionMember: async () => mocks.session }));
 vi.mock("@/server/trading", () => ({ placeTrade: mocks.placeTrade }));
 
@@ -42,6 +48,17 @@ describe("placeTradeAction", () => {
       ok: false,
       code: "internal_error",
       message: expect.not.stringMatching(/DATABASE_URL/),
+    });
+    expect(mocks.placeTrade).not.toHaveBeenCalled();
+  });
+
+  it("returns a generic internal_error when the connection check fails", async () => {
+    mocks.db = new Error("connect timeout postgres://secret@host");
+    const result = await placeTradeAction(INPUT);
+    expect(result).toEqual({
+      ok: false,
+      code: "internal_error",
+      message: expect.not.stringMatching(/secret/),
     });
     expect(mocks.placeTrade).not.toHaveBeenCalled();
   });

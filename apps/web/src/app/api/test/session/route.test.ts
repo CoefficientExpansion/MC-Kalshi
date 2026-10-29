@@ -12,7 +12,7 @@ import { POST } from "./route";
 
 const SECRET = "k".repeat(48);
 const mocks = vi.hoisted(() => ({ db: undefined as unknown }));
-vi.mock("@/db", () => ({ getDb: () => mocks.db }));
+vi.mock("@/db", () => ({ getDbChecked: async () => mocks.db }));
 
 let db: AnyDb;
 let close: () => Promise<void>;
@@ -28,6 +28,7 @@ beforeEach(() => {
   mocks.db = db;
   vi.stubEnv("E2E_AUTH_BYPASS", "1");
   vi.stubEnv("E2E_AUTH_SECRET", SECRET);
+  vi.stubEnv("GITHUB_ACTIONS", "true");
   vi.stubEnv("VERCEL", undefined);
   vi.stubEnv("SIGNUP_BONUS_POINTS", undefined);
   vi.stubEnv("ALLOWED_EMAIL_DOMAINS", undefined);
@@ -59,6 +60,7 @@ describe("POST /api/test/session with the guard off", () => {
     ["secret only", { E2E_AUTH_BYPASS: undefined }],
     ["a short secret", { E2E_AUTH_SECRET: "short" }],
     ["on Vercel", { VERCEL: "1" }],
+    ["outside GitHub Actions", { GITHUB_ACTIONS: undefined }],
   ])("returns a bare 404 with %s and creates nothing", async (_name, env) => {
     for (const [key, value] of Object.entries(env)) vi.stubEnv(key, value);
     const res = await post({ email: "off@maryvillecollege.edu" });

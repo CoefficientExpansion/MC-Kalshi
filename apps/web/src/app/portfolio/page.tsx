@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Notice } from "@/components/market/notice";
 import { StatusBadge } from "@/components/market/status-badge";
-import { getDb } from "@/db";
+import { getDbChecked } from "@/db";
 import { formatAbsolute, statusBadge } from "@/lib/market-format";
 import { formatContracts, formatPoints } from "@/lib/trade-copy";
 import { getSessionMember } from "@/server/auth";
@@ -180,7 +180,7 @@ function Trades({ p }: { p: Portfolio }) {
 
 export default async function PortfolioPage() {
   const session = await getSessionMember();
-  const db = getDb();
+  const db = await getDbChecked().catch(() => undefined);
   if (!session || !db) redirect("/sign-in");
 
   let portfolio: Portfolio;

@@ -12,7 +12,7 @@ const holder = vi.hoisted(() => ({
   db: undefined as unknown,
   session: null as { userId: string; suspended: boolean } | null,
 }));
-vi.mock("@/db", () => ({ getDb: () => holder.db }));
+vi.mock("@/db", () => ({ getDbChecked: async () => holder.db }));
 vi.mock("@/server/auth", () => ({ getSessionMember: async () => holder.session }));
 vi.mock("next/navigation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/navigation")>()),

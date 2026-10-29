@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { checkLedgerInvariants, grantSignupBonus, postTransfer } from "@/server/ledger";
+import { ensureProfile } from "@/server/profiles";
 import { categories, HOUSE_ACCOUNT_ID, markets, profiles, trades } from "./schema";
 import { attemptAs, ensureRole, openTestDb, type TestDbHandle } from "./test-db";
 import type { AnyDb } from "./types";
@@ -179,6 +180,74 @@ describe("mc_app, the app's runtime role", () => {
     ["CREATE", "a table", "create table public.mc_app_probe (id int)"],
   ])("is refused %s on %s", async (_op, _target, statement) => {
     expect(await attemptAs(h.db, "mc_app", sql.raw(statement))).toBe("42501");
+  });
+
+  // 0007: UPDATE on profiles is column-level. A member may change their own display name and
+  // leaderboard choice (M5, SOP-09); role and suspension are admin decisions, never the app role's.
+  it.each([
+    ["display_name", sql`update profiles set display_name = 'Renamed' where id = ${userA}`],
+    [
+      "leaderboard_opt_out",
+      sql`update profiles set leaderboard_opt_out = true where id = ${userA}`,
+    ],
+  ])("may update profiles.%s", async (_column, statement) => {
+    expect(await attemptAs(h.db, "mc_app", statement)).toBeUndefined();
+  });
+
+  it.each([
+    ["role", sql`update profiles set role = 'admin' where id = ${userA}`],
+    ["suspended_at", sql`update profiles set suspended_at = now() where id = ${userA}`],
+    [
+      "suspended_at (clearing it)",
+      sql`update profiles set suspended_at = null where id = ${userA}`,
+    ],
+    ["email", sql`update profiles set email = 'x@maryvillecollege.edu' where id = ${userA}`],
+    ["id", sql`update profiles set id = ${userB} where id = ${userA}`],
+    ["created_at", sql`update profiles set created_at = now() where id = ${userA}`],
+  ])("may not update profiles.%s", async (_column, statement) => {
+    expect(await attemptAs(h.db, "mc_app", statement)).toBe("42501");
+  });
+
+  it("still signs a member in: ensureProfile's insert-or-skip needs no UPDATE", async () => {
+    expect(
+      await attemptAs(h.db, "mc_app", async (tx) => {
+        await ensureProfile(tx, { id: userA, email: "a@my.maryvillecollege.edu" }, 1000);
+        await ensureProfile(
+          tx,
+          { id: "33333333-3333-4333-8333-666666666666", email: "d@maryvillecollege.edu" },
+          1000,
+        );
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("functions created in public from 0007 on", () => {
+  let h: TestDbHandle;
+
+  beforeAll(async () => {
+    h = await openTestDb();
+    await ensureRole(h.db, "mc_kalshi_probe");
+    await h.db.execute(
+      sql`create function public.later_function() returns int language sql as 'select 1'`,
+    );
+  });
+  afterAll(async () => {
+    await h.db.execute(sql`drop function public.later_function()`);
+    await h.close();
+  });
+
+  it("are not executable by PUBLIC by default", async () => {
+    expect(
+      await h.rows(
+        sql`select has_function_privilege('mc_kalshi_probe', 'public.later_function()', 'EXECUTE') as ok`,
+      ),
+    ).toEqual([{ ok: false }]);
+    expect(
+      await h.rows(
+        sql`select has_function_privilege('mc_app', 'public.later_function()', 'EXECUTE') as ok`,
+      ),
+    ).toEqual([{ ok: false }]);
   });
 });
 

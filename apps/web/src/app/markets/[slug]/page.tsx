@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { cache } from "react";
 import { MarketDetailView } from "@/components/market/market-detail-view";
-import { getDb } from "@/db";
+import { getDbChecked } from "@/db";
 import { parsePriceRange } from "@/lib/price-range";
 import { getSessionMember } from "@/server/auth";
 import { loadMarketDetail, loadMarketTrading } from "@/server/market-pages";
@@ -13,7 +13,7 @@ import { placeTradeAction } from "./actions";
 export const dynamic = "force-dynamic";
 
 // generateMetadata and the page share one query per request.
-const load = cache((slug: string) => loadMarketDetail(getDb(), slug));
+const load = cache((slug: string) => loadMarketDetail(getDbChecked(), slug));
 
 export async function generateMetadata({
   params,
@@ -28,7 +28,8 @@ export default async function MarketPage({ params, searchParams }: PageProps<"/m
   const result = await load(slug);
   if (result.kind === "not-found") notFound();
   const now = new Date();
-  const db = getDb();
+  // The check already ran (and passed) in load(); a failure here only means no trading section.
+  const db = await getDbChecked().catch(() => undefined);
   if (result.kind !== "ok" || !db) return <MarketDetailView load={result} now={now} />;
 
   // getSessionMember, not getCurrentUser: a suspended member still sees their balance and

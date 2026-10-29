@@ -26,6 +26,9 @@ export type DetailLoad =
   | { kind: "not-found" }
   | { kind: "ok"; market: MarketView };
 
+/** A connection, none (unconfigured), or `getDbChecked()`'s pending answer (awaited in the try). */
+export type MaybeDb = AnyDb | undefined | Promise<AnyDb | undefined>;
+
 /** Log the error's name only: driver messages can echo the connection string. */
 function logFailure(what: string, error: unknown): void {
   const name = error instanceof Error ? error.name : typeof error;
@@ -37,12 +40,13 @@ function logFailure(what: string, error: unknown): void {
  * (campus scale: tens of rows). Defaults to the public statuses so a proposal never leaks.
  */
 export async function loadMarketList(
-  db: AnyDb | undefined,
+  db: MaybeDb,
   filter: MarketFilter = { status: PUBLIC_MARKET_STATUSES },
 ): Promise<ListLoad> {
-  if (!db) return { kind: "unconfigured" };
   try {
-    return { kind: "ok", markets: await listMarkets(db, filter) };
+    const conn = await db;
+    if (!conn) return { kind: "unconfigured" };
+    return { kind: "ok", markets: await listMarkets(conn, filter) };
   } catch (error) {
     logFailure("loading the market list", error);
     return { kind: "unavailable" };
@@ -50,10 +54,11 @@ export async function loadMarketList(
 }
 
 /** One market by slug. `proposed` and `rejected` markets are not public, so they read as missing. */
-export async function loadMarketDetail(db: AnyDb | undefined, slug: string): Promise<DetailLoad> {
-  if (!db) return { kind: "unconfigured" };
+export async function loadMarketDetail(db: MaybeDb, slug: string): Promise<DetailLoad> {
   try {
-    const market = await getMarketBySlug(db, slug);
+    const conn = await db;
+    if (!conn) return { kind: "unconfigured" };
+    const market = await getMarketBySlug(conn, slug);
     if (!market || market.status === "proposed" || market.status === "rejected") {
       return { kind: "not-found" };
     }

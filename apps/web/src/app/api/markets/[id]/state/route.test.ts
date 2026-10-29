@@ -8,7 +8,13 @@ const mocks = vi.hoisted(() => ({
   state: null as unknown,
   load: vi.fn(),
 }));
-vi.mock("@/db", () => ({ getDb: () => mocks.db }));
+// An Error stands for a failed connection check (getDbChecked throws).
+vi.mock("@/db", () => ({
+  getDbChecked: async () => {
+    if (mocks.db instanceof Error) throw mocks.db;
+    return mocks.db;
+  },
+}));
 vi.mock("@/server/auth", () => ({
   getSessionMember: async () => mocks.session,
   getCurrentUser: async () => {
@@ -85,6 +91,17 @@ describe("GET /api/markets/[id]/state", () => {
     expect(res.status).toBe(503);
     expect(await res.json()).toEqual({ code: "unconfigured" });
     expect(mocks.load).not.toHaveBeenCalled();
+  });
+
+  it("is a generic 500 when the connection check fails", async () => {
+    mocks.db = new Error("connect timeout postgres://secret@host");
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await call();
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ code: "internal_error" });
+    expect(log.mock.calls.flat().join(" ")).not.toContain("secret");
+    expect(mocks.load).not.toHaveBeenCalled();
+    log.mockRestore();
   });
 
   it("is a generic 500 when the lookup fails", async () => {

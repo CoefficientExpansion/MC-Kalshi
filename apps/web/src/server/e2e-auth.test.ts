@@ -9,17 +9,26 @@ import {
 } from "./e2e-auth";
 
 // The CI-only sign-in bypass (docs/specs/m3-trading.md, "Playwright e2e"). Security critical: the
-// guard must be false everywhere except a CI job that sets both variables and is not on Vercel.
+// guard must be false everywhere except a GitHub Actions job that sets both variables and is not
+// on Vercel.
 
 const SECRET = "s".repeat(32);
 const OTHER_SECRET = "t".repeat(32);
 const USER = "00000000-0000-4000-8000-000000000001";
 const NOW = Date.UTC(2026, 9, 29, 12, 0, 0);
-const ON = { E2E_AUTH_BYPASS: "1", E2E_AUTH_SECRET: SECRET };
+const ON = { E2E_AUTH_BYPASS: "1", E2E_AUTH_SECRET: SECRET, GITHUB_ACTIONS: "true" };
 
 describe("isE2EAuthEnabled", () => {
-  it("is true only with the flag, a long secret and no VERCEL", () => {
+  it("is true only with the flag, a long secret, GITHUB_ACTIONS and no VERCEL", () => {
     expect(isE2EAuthEnabled(ON)).toBe(true);
+  });
+
+  it("is false outside GitHub Actions even with every other condition met", () => {
+    const { GITHUB_ACTIONS: _unset, ...local } = ON;
+    expect(isE2EAuthEnabled(local)).toBe(false);
+    for (const value of ["", "1", "TRUE", "True", " true", "false"]) {
+      expect(isE2EAuthEnabled({ ...ON, GITHUB_ACTIONS: value })).toBe(false);
+    }
   });
 
   it("is false on Vercel even with the flag and the secret set", () => {
@@ -34,6 +43,9 @@ describe("isE2EAuthEnabled", () => {
     expect(isE2EAuthEnabled({ VERCEL: "1" })).toBe(false);
     expect(isE2EAuthEnabled({ E2E_AUTH_BYPASS: "1", VERCEL: "1" })).toBe(false);
     expect(isE2EAuthEnabled({ E2E_AUTH_SECRET: SECRET, VERCEL: "1" })).toBe(false);
+    expect(isE2EAuthEnabled({ GITHUB_ACTIONS: "true" })).toBe(false);
+    expect(isE2EAuthEnabled({ E2E_AUTH_BYPASS: "1", GITHUB_ACTIONS: "true" })).toBe(false);
+    expect(isE2EAuthEnabled({ E2E_AUTH_SECRET: SECRET, GITHUB_ACTIONS: "true" })).toBe(false);
   });
 
   it("needs the flag to be exactly 1", () => {
@@ -50,7 +62,7 @@ describe("isE2EAuthEnabled", () => {
 
   it("ignores NODE_ENV", () => {
     expect(isE2EAuthEnabled({ ...ON, NODE_ENV: "production" })).toBe(true);
-    expect(isE2EAuthEnabled({ NODE_ENV: "test" })).toBe(false);
+    expect(isE2EAuthEnabled({ NODE_ENV: "test", GITHUB_ACTIONS: "true" })).toBe(false);
   });
 
   it("reads process.env by default", () => {
@@ -125,6 +137,7 @@ describe("readE2ESession", () => {
 
   it("ignores a valid cookie when the guard is off", () => {
     expect(readE2ESession(value, {}, NOW)).toBeNull();
+    expect(readE2ESession(value, { ...ON, GITHUB_ACTIONS: undefined }, NOW)).toBeNull();
     expect(readE2ESession(value, { E2E_AUTH_SECRET: SECRET }, NOW)).toBeNull();
     expect(readE2ESession(value, { E2E_AUTH_BYPASS: "1" }, NOW)).toBeNull();
   });

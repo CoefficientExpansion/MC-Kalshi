@@ -35,7 +35,10 @@ vi.mock("next/headers", () => ({
     };
   },
 }));
-vi.mock("@/db", () => ({ getDb: () => ({ fake: true }) }));
+vi.mock("@/db", () => ({
+  getDb: () => ({ fake: true }),
+  getDbChecked: async () => ({ fake: true }),
+}));
 vi.mock("@/lib/supabase/config", () => ({
   getSupabaseConfig: () => (mocks.supabaseConfigured ? { url: "u", key: "k" } : undefined),
 }));
@@ -58,6 +61,7 @@ const validCookie = () => signE2ESession(USER, Date.now() + 60_000, SECRET);
 function enableBypass() {
   vi.stubEnv("E2E_AUTH_BYPASS", "1");
   vi.stubEnv("E2E_AUTH_SECRET", SECRET);
+  vi.stubEnv("GITHUB_ACTIONS", "true");
   vi.stubEnv("VERCEL", undefined);
 }
 

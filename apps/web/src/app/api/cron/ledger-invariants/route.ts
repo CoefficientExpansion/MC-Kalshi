@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { getDb } from "@/db";
+import { getDbChecked } from "@/db";
 import { checkTradingInvariants } from "@/server/invariants";
 
 // Daily integrity check (docs/specs/m3-trading.md "Ledger invariant job"), scheduled in
@@ -22,13 +22,13 @@ export async function GET(request: Request): Promise<Response> {
   if (!authorized(request.headers.get("authorization"))) {
     return Response.json({ code: "unauthorized" }, { status: 401 });
   }
-  const db = getDb();
-  if (!db) {
-    return Response.json({ code: "unconfigured" }, { status: 503 });
-  }
   const checkedAt = new Date().toISOString();
   let result: Awaited<ReturnType<typeof checkTradingInvariants>>;
   try {
+    const db = await getDbChecked();
+    if (!db) {
+      return Response.json({ code: "unconfigured" }, { status: 503 });
+    }
     result = await checkTradingInvariants(db);
   } catch (error) {
     // The check itself failed (database down, query error): still a red cron run. No message,

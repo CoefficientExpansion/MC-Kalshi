@@ -73,6 +73,20 @@ describe("market page loaders", () => {
     expect(logged).not.toContain("secret");
     spy.mockRestore();
   });
+
+  it("accepts the pending connection from getDbChecked", async () => {
+    expect((await loadMarketList(Promise.resolve(db))).kind).toBe("ok");
+    expect((await loadMarketDetail(Promise.resolve(db), "snow-before-december")).kind).toBe("ok");
+    expect(await loadMarketList(Promise.resolve(undefined))).toEqual({ kind: "unconfigured" });
+  });
+
+  it("returns unavailable when the connection check itself fails", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failing = () => Promise.reject(new Error("connect timeout"));
+    expect(await loadMarketList(failing())).toEqual({ kind: "unavailable" });
+    expect(await loadMarketDetail(failing(), "x")).toEqual({ kind: "unavailable" });
+    spy.mockRestore();
+  });
 });
 
 describe("loadMarketTrading", () => {

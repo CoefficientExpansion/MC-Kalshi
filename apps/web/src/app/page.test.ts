@@ -8,7 +8,7 @@ import Home from "./page";
 
 // `getDb()` is swapped per test: undefined = no DATABASE_URL, otherwise a PGlite database.
 const holder = vi.hoisted(() => ({ db: undefined as unknown }));
-vi.mock("@/db", () => ({ getDb: () => holder.db }));
+vi.mock("@/db", () => ({ getDbChecked: async () => holder.db }));
 
 type Props = Parameters<typeof Home>[0];
 async function render(search: Record<string, string | string[]> = {}): Promise<string> {

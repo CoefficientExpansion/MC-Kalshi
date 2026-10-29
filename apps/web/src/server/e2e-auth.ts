@@ -4,7 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 // CI-only sign-in for the Playwright suite (docs/specs/m3-trading.md, "Playwright e2e", the
 // fallback; Execution plan assumption 3). CI has no Supabase project, so `POST /api/test/session`
 // mints an HMAC-signed `e2e-session` cookie that `getSessionMember` accepts. Everything is gated
-// by `isE2EAuthEnabled()`: the flag AND a long secret AND not on Vercel. `NODE_ENV` cannot be the
+// by `isE2EAuthEnabled()`: the flag AND a long secret AND GitHub Actions AND not on Vercel. `NODE_ENV` cannot be the
 // gate because `next start` forces `production`; Vercel always sets `VERCEL`, so the bypass is
 // off on production and previews even if the flag leaks there. Only `auth.ts` and that route
 // import this module.
@@ -21,13 +21,15 @@ type Env = Readonly<Record<string, string | undefined>>;
 
 /**
  * True only when `E2E_AUTH_BYPASS` is exactly "1", `E2E_AUTH_SECRET` has at least 32 characters
- * (not counting surrounding spaces)
- * and `VERCEL` is unset (an empty `VERCEL` counts as set). CI only; never set either on Vercel.
+ * (not counting surrounding spaces), `GITHUB_ACTIONS` is exactly "true" (GitHub sets it in every
+ * Actions job; Vercel never does) and `VERCEL` is unset (an empty `VERCEL` counts as set). CI
+ * only; never set either variable on Vercel.
  */
 export function isE2EAuthEnabled(env: Env = process.env): boolean {
   return (
     env.E2E_AUTH_BYPASS === "1" &&
     (env.E2E_AUTH_SECRET?.trim().length ?? 0) >= MIN_SECRET_LENGTH &&
+    env.GITHUB_ACTIONS === "true" &&
     env.VERCEL === undefined
   );
 }

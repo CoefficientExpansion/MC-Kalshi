@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
-import { getDb } from "@/db";
+import { type Db, getDb, getDbChecked } from "@/db";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getAllowedDomains, isAllowedEmail } from "./auth-email";
@@ -47,13 +47,17 @@ export async function getAuthDeps(): Promise<AuthDeps> {
   const supabase = await createSupabaseServerClient();
   return {
     client: supabase ? adaptSupabaseAuth(supabase) : undefined,
-    db: getDb(),
+    // A failed connection check reads as unconfigured; the sign-in flow then says so.
+    db: await getDbChecked().catch(() => undefined),
     domains: getAllowedDomains(),
     bonusPoints: getSignupBonusPoints(),
   };
 }
 
-/** True when sign-in can work here: Supabase variables and `DATABASE_URL` are all set. */
+/**
+ * True when sign-in can work here: the Supabase variables and a runtime database URL
+ * (`DATABASE_URL`, else `POSTGRES_URL`) are all set, and the production guards have not refused it.
+ */
 export function isSignInConfigured(): boolean {
   return getSupabaseConfig() !== undefined && getDb() !== undefined;
 }
@@ -69,11 +73,11 @@ export function isSignInConfigured(): boolean {
  * `isE2EAuthEnabled()` is true, a valid signed `e2e-session` cookie is tried first.
  */
 export const getSessionMember = cache(async (): Promise<SessionMember | null> => {
-  const db = getDb();
-  if (!db) {
-    return null;
-  }
   try {
+    const db = await getDbChecked();
+    if (!db) {
+      return null;
+    }
     if (isE2EAuthEnabled()) {
       const e2e = await e2eSessionMember(db);
       if (e2e) {
@@ -97,7 +101,7 @@ export const getSessionMember = cache(async (): Promise<SessionMember | null> =>
  * when `isE2EAuthEnabled()` is true; `readE2ESession` checks the guard again, the HMAC and the
  * expiry. The profile's email must still be an allowed address, as for a real session.
  */
-async function e2eSessionMember(db: NonNullable<ReturnType<typeof getDb>>) {
+async function e2eSessionMember(db: Db) {
   const store = await cookies();
   const userId = readE2ESession(store.get(E2E_SESSION_COOKIE)?.value);
   if (!userId) {

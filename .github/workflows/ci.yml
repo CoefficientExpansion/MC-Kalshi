@@ -76,7 +76,8 @@ jobs:
 
   # Playwright against the built app (docs/specs/m3-trading.md, "Playwright e2e"). CI has no
   # Supabase project, so the app runs with the CI-only test sign-in (E2E_AUTH_BYPASS=1 and a
-  # secret generated per run; off on Vercel by construction, see apps/web/src/server/e2e-auth.ts).
+  # secret generated per run; it also needs GITHUB_ACTIONS=true, which GitHub sets in every job;
+  # off on Vercel by construction, see apps/web/src/server/e2e-auth.ts).
   e2e:
     name: Playwright e2e
     runs-on: ubuntu-latest
