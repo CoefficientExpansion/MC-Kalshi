@@ -204,6 +204,8 @@ The `/agent-skills:ship` persona fan-out was started on 2026-10-29 and stopped w
 
 Decision: keep this engine. Port the other engine's positions module (`applyFill`, `settlePayouts`, `voidRefunds`, `withinSlippage`, `EMPTY_POSITION`) and `displayPrice` onto it in the M2 integration, with `EngineError` codes. The other engine's sell guard (a sell may not take `q` below 0) is not ported: M3's `placeTrade` checks holdings before quoting, and this engine's property tests deliberately cover negative-`q` states.
 
+Post-merge fix (in the M2 integration): a new mirror-trade property test found that at states near |q| = 1e6 a sell-back could return one point too little, because the float difference `qYes − qNo` carried about 1e-10 contracts of error across a whole-point boundary. `logProbabilities` now takes the gap as an exact difference of micro-contract integers (`lmsr.mirror.test.ts`).
+
 Rollback: the engine is a pure library with no runtime exposure until M2 reads `probabilityYes`; reverting the squash commit on `main` restores M0. No data, no migrations.
 
 ## Definition of Done

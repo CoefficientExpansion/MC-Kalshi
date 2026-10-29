@@ -1,5 +1,5 @@
 import { CONTRACT_PAYOUT_POINTS } from "./constants";
-import { assertLiquidity, assertOutcome, assertPosition } from "./errors";
+import { assertLiquidity, assertOutcome, readPosition } from "./errors";
 import { noNegativeZero } from "./rounding";
 import type { Outcome, PositionLike } from "./types";
 
@@ -26,13 +26,12 @@ export function payoutPoints(contracts: number): number {
 /** Whole points a position receives when the market resolves to `outcome`; rounds down. */
 export function payout(position: PositionLike, outcome: Outcome): number {
   assertOutcome(outcome);
-  assertPosition(position);
-  return payoutPoints(outcome === "YES" ? position.contractsYes : position.contractsNo);
+  const held = readPosition(position);
+  return payoutPoints(outcome === "YES" ? held.contractsYes : held.contractsNo);
 }
 
 /** Points returned on a void: exactly the user's net cost basis, which may be negative. */
 export function voidRefund(position: PositionLike): number {
-  assertPosition(position);
-  const basis = position.costBasisPoints;
+  const basis = readPosition(position).costBasisPoints;
   return basis === 0 ? 0 : basis;
 }

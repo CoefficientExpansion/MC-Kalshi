@@ -46,8 +46,19 @@ interface LogProbs {
  * large but equal |q| never cancel. Exported for tests; not part of the package's public surface.
  */
 export function logProbabilities(state: MarketState): LogProbs {
-  const gap = (state.qYes - state.qNo) / state.b;
+  const gap = gapContracts(state) / state.b;
   return { logPYes: -softplus(-gap), logPNo: -softplus(gap) };
+}
+
+/**
+ * qY − qN, taken as an exact difference of micro-contract integers. Near |q| = 1e6 the doubles
+ * qY and qN each sit up to half an ulp (≈ 6e-11) off their six-decimal values, and a plain
+ * float difference carries that error into the cost (about 1e-8 points on a 100-contract
+ * trade), enough to cross a whole-point boundary on a trade whose exact cost is an integer.
+ * Valid states are on the grid within ±1e9, so both micro counts are exact safe integers.
+ */
+function gapContracts(state: MarketState): number {
+  return (Math.round(state.qYes * MICRO) - Math.round(state.qNo * MICRO)) / MICRO;
 }
 
 /** ln(e^a + e^b) without overflow. */
