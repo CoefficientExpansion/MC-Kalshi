@@ -1,11 +1,12 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import { getDb } from "@/db";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getAllowedDomains } from "./auth-email";
+import { getAllowedDomains, isAllowedEmail } from "./auth-email";
 import {
   type AuthDeps,
   type OtpClient,
@@ -13,7 +14,8 @@ import {
   sessionMemberForClaims,
   signOutOf,
 } from "./auth-flow";
-import { getSignupBonusPoints, type Member } from "./profiles";
+import { E2E_SESSION_COOKIE, isE2EAuthEnabled, readE2ESession } from "./e2e-auth";
+import { getSignupBonusPoints, loadProfileMember, type Member } from "./profiles";
 
 export type { SessionMember } from "./auth-flow";
 
@@ -63,14 +65,24 @@ export function isSignInConfigured(): boolean {
  * The trade action uses it so a suspended member hears `account_suspended`, and the market page
  * passes `suspended` to the order ticket. Never throws. The session is verified with
  * `getClaims()` (signature checked), never read raw from the cookie. Cached per request. With
- * Supabase unset it does not touch cookies, so pages stay static.
+ * Supabase unset it does not touch cookies, so pages stay static. In CI only, when
+ * `isE2EAuthEnabled()` is true, a valid signed `e2e-session` cookie is tried first.
  */
 export const getSessionMember = cache(async (): Promise<SessionMember | null> => {
   const db = getDb();
-  if (!db || !getSupabaseConfig()) {
+  if (!db) {
     return null;
   }
   try {
+    if (isE2EAuthEnabled()) {
+      const e2e = await e2eSessionMember(db);
+      if (e2e) {
+        return e2e;
+      }
+    }
+    if (!getSupabaseConfig()) {
+      return null;
+    }
     const supabase = await createSupabaseServerClient();
     const { data } = (await supabase?.auth.getClaims()) ?? {};
     return await sessionMemberForClaims(db, data?.claims, getAllowedDomains());
@@ -79,6 +91,24 @@ export const getSessionMember = cache(async (): Promise<SessionMember | null> =>
     return null;
   }
 });
+
+/**
+ * CI only (`e2e-auth.ts`): the member named by a valid `e2e-session` cookie, or `null`. Called only
+ * when `isE2EAuthEnabled()` is true; `readE2ESession` checks the guard again, the HMAC and the
+ * expiry. The profile's email must still be an allowed address, as for a real session.
+ */
+async function e2eSessionMember(db: NonNullable<ReturnType<typeof getDb>>) {
+  const store = await cookies();
+  const userId = readE2ESession(store.get(E2E_SESSION_COOKIE)?.value);
+  if (!userId) {
+    return null;
+  }
+  const found = await loadProfileMember(db, userId);
+  if (!found || !isAllowedEmail(found.member.email, getAllowedDomains())) {
+    return null;
+  }
+  return { userId: found.member.id, profile: found.member, suspended: found.suspended };
+}
 
 /**
  * The signed-in member (profile plus points balance) for this request: `null` whenever
