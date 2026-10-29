@@ -35,8 +35,18 @@ and delete a line once it is done. Last updated 2026-10-29.
 - [ ] Check `https://mc-kalshi.vercel.app/api/health` reports `db: "ok"`.
 - [ ] In Supabase `dev`, confirm Table Editor shows RLS enabled on all 11 tables.
 - [ ] Before M2b sign-in, from Supabase → Project Settings → API, put
-  `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`
+  `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (the legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` also works)
   in Vercel and `.env.local`. Keep them out of chat.
+- [ ] Turn on the sign-in domain guard (spec `docs/specs/m2b-auth.md`). After the migration
+  `0002_auth_signup_hook` is applied to `dev` (and later `prod`) with `npm run db:migrate`:
+  - [ ] Supabase Dashboard -> Authentication -> Hooks -> Before User Created -> Postgres function
+    -> `hook_before_user_created` (schema `public`) -> enable. Until this is on, the domain
+    rule is only enforced by the app's own server action.
+  - [ ] Authentication -> Email Templates -> Magic Link: replace the body with
+    `<p>Your Maryville College sign-in code is {{ .Token }}</p>` so the email carries the
+    6-digit code (the app uses a code, not a link). Keep the OTP length at 6.
+  - [ ] Check it: sign in once with an `@my.maryvillecollege.edu` address (profile and 10,000
+    points appear) and once with a gmail address (must be refused).
 
 ## GitHub
 - [ ] After each merge to `main`, sync the fork `CoefficientExpansion/MC-Kalshi` with GitHub's

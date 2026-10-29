@@ -41,7 +41,7 @@ Committed template `.env.example` (no values); real values in `.env.local` (giti
 Mapping: Vercel **Preview** → `mc-kalshi-dev` keys; Vercel **Production** → `mc-kalshi-prod` keys. Local `.env.local` → `dev`.
 
 ## Steps: first-time setup
-1. Create the Supabase projects. In each: Auth → Providers → Email: enable, OTP on, "Confirm email" on; set Site URL and redirect URLs to the app URLs; add the domain-allowlist auth hook (`before-user-created`) from `apps/web/supabase/hooks/` once M2 ships it.
+1. Create the Supabase projects. In each: Auth → Providers → Email: enable, OTP on, "Confirm email" on; set Site URL and redirect URLs to the app URLs; enable the domain-allowlist auth hook (Authentication → Hooks → Before User Created → Postgres function `hook_before_user_created`, created by migration `0002_auth_signup_hook`; see `docs/specs/m2b-auth.md`), and edit the Magic Link email template to send `{{ .Token }}` (a 6-digit code, no link).
 2. Copy keys into `.env.local` (dev) and into Vercel (Preview = dev, Production = prod). Never paste a key into chat, an issue, or a commit.
 3. `npm ci`, `npm run db:migrate` against dev, `npm run db:seed` (categories + three sample markets), `npm run dev`, sign in with a test `@my.maryvillecollege.edu` address, confirm a non-college address is rejected.
 4. Push a branch; confirm the Vercel preview builds and signs in against dev.

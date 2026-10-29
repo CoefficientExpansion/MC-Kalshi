@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Archivo, Barlow_Condensed } from "next/font/google";
 import Link from "next/link";
+import { AccountControl } from "@/components/account-control";
 import { SiteFooter } from "@/components/site-footer";
 import "./globals.css";
 
@@ -54,7 +55,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                   Markets
                 </Link>
               </nav>
-              {/* account slot: M2b auth */}
+              <AccountControl />
             </div>
           </div>
           <div aria-hidden="true" className="h-1 bg-accent" />

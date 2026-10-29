@@ -8,6 +8,8 @@ the header: `draft` → `in-progress` → `done` (or `dropped`).
 | [m0-scaffold.md](m0-scaffold.md) | M0 | done |
 | [m1-engine.md](m1-engine.md) | M1 | done |
 | [m2a-data-layer.md](m2a-data-layer.md) | M2 (part a) | in-progress |
+| [m2b-market-pages.md](m2b-market-pages.md) | M2 (part b, UI) | in-progress |
+| [m2b-auth.md](m2b-auth.md) | M2 (part b, auth) | in-progress |
 | [../design/theme.md](../design/theme.md) | cross-cutting | done |
 
 ## Template
