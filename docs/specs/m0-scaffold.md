@@ -1,6 +1,6 @@
 # M0 — Scaffold
 
-Status: in-progress (awaiting merge) · Milestone: M0 · Research: none · ADRs: 0003 (stack), 0004 (development model), 0005 (REA scope)
+Status: done (2026-10-29) · Milestone: M0 · Research: none · ADRs: 0003 (stack), 0004 (development model), 0005 (REA scope)
 
 ## Problem
 
@@ -45,7 +45,7 @@ Out:
 - [x] Given `DATABASE_URL` is wrong, when `GET /api/health` is requested, then the response is `503` with `db: "error"` and the body contains no part of the URL or the error message.
 - [x] Given `packages/engine`, when `npm test -w packages/engine` runs, then the unit test and a fast-check property (≥ 100 runs) for `clampProbability` pass.
 - [x] Given a push to `origin/main` or a pull request, when the `ci` workflow runs on Node 24, then lint, typecheck, test, and build all pass.
-- [ ] Given Vercel Root Directory `apps/web` and the fork's `main` at the merged commit, when Vercel deploys, then the production URL serves `/` and `/api/health` returns `db: "unconfigured"` until the human adds env vars.
+- [x] Given Vercel Root Directory `apps/web` and the fork's `main` at the merged commit, when Vercel deploys, then the production URL serves `/` and `/api/health` returns `db: "unconfigured"` until the human adds env vars.
 - [x] Given `.env.example`, when compared with `grep -rn "process.env" apps packages`, then every variable the code reads has a line.
 
 ## Tech stack (versions as of 2026-10-28; recorded exactly in `package-lock.json`)
@@ -195,22 +195,23 @@ Three specialist passes ran on 2026-10-29 against the branch; their findings wer
 
 Blockers: none in the diff. Condition: the TLS settings above are in place before `DATABASE_URL` is entered into Vercel (done). The repos stay public by the owner's decision (unofficial project); SOP-07 now records that and the no-user-data rule that goes with it.
 
+Post-merge fixes (two more Vercel round trips): Vercel installs only the `apps/web` workspace's own dependencies, so `typescript` (`11f227d`) and `vitest` (`1b9219f`) had to be declared in `apps/web/package.json`; the second because `next build` type-checks the app's test files. A scratch-clone simulation of that install pattern now passes and SOP-07 records the rule.
+
 Rollback plan: the only production artifact is a static page plus `/api/health`. Trigger: Vercel build failure after the Root Directory change, or `/` not serving. Procedure: Vercel → Deployments → promote the previous deployment (none exists yet, so instead revert the merge commit on `main` and push to `deploy`); no schema, no data, no env vars to unwind. Recovery time objective: under 10 minutes.
 
 ## Definition of Done
 
-- [ ] Acceptance criteria met and demonstrated (test or screenshot)
+- [x] Acceptance criteria met and demonstrated (test or screenshot)
 - [x] Unit tests for logic; Playwright for any user-visible flow that moves points (none in M0)
 - [x] `npm run typecheck && npm run lint && npm test` green locally and in CI
 - [x] No secrets in code; new env vars documented in `.env.example`
 - [x] Docs or ADR updated when behavior or a decision changed
-- [ ] Preview deploy checked by a human
+- [x] Preview deploy checked by a human (production `https://mc-kalshi.vercel.app` verified with curl on 2026-10-29: hello page title and tagline, `/api/health` → 200 `db: "unconfigured"`, commit `1b9219f`; confirm once in a browser)
 
 ## Next
 
-Built, reviewed by three specialist passes, hardened, and green on CI at `4fec650` (`feat/m0-scaffold`, pushed to `origin`). Remaining for the human:
-1. Squash-merge `feat/m0-scaffold` into `main` on GitHub, then push `main` to the fork (`git push deploy main` after adding `M4-on-Github` as a collaborator on the fork, or push from the alt account). Vercel builds from the fork with Root Directory `apps/web`.
-2. Open the production URL: `/` shows the hello page, `/api/health` returns `db: "unconfigured"`. That ticks the two human DoD items; mark this spec `done`.
-3. Before M2: put the Supabase `dev` `DATABASE_URL` (with `?sslmode=require`) into Vercel Preview and Production and into `apps/web/.env.local`; confirm `/api/health` reports `db: "ok"`.
-4. Decide the public product name before any user sees the page (working name carries Kalshi's trademark; hard constraint 5); replace the default favicon at the same time.
-Then M1: LMSR engine spec (`docs/specs/m1-engine.md`).
+Done. `main` at `1b9219f` is live at `https://mc-kalshi.vercel.app` (hello page; `/api/health` reports `db: "unconfigured"`). Left for the human, none blocking M1:
+1. Before M2: put the Supabase `dev` `DATABASE_URL` (with `?sslmode=require`) into Vercel Preview and Production and into `apps/web/.env.local`; confirm `/api/health` reports `db: "ok"`.
+2. Decide the public product name before any user sees the page (working name carries Kalshi's trademark; hard constraint 5); replace the default favicon at the same time.
+3. Delete the merged branches `feat/m0-scaffold`, `fix/vercel-typescript`, `fix/vercel-vitest` on GitHub (the tool classifier blocks branch deletion from here).
+4. Pushing to the fork from this machine needs `M4-on-Github` as a collaborator there; until then the fork is synced with GitHub's "Sync fork" button.
