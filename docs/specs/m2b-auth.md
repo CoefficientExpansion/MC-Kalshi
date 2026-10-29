@@ -1,5 +1,5 @@
 # M2b-auth — Sign-in with a Maryville College email
-Status: in-progress · Milestone: M2 (part b, auth) · ADRs: 0001, 0003
+Status: done in code (2026-10-29); live Supabase check, Playwright run and human preview pending · Milestone: M2 (part b, auth) · ADRs: 0001, 0003
 Integrated onto the M1 engine (main c311323) on 2026-10-29; see docs/specs/m1-engine.md, Ship decision.
 
 ## Problem
@@ -165,12 +165,16 @@ pages below were read from their source in the public `supabase/supabase` reposi
 6. Sign-in page, sign-out route, `AccountControl` — verify by: copy test, build, screenshot.
 7. `.env.example`, owner to-dos, spec index.
 
+## Review
+
+See docs/specs/m2a-data-layer.md, "Review and integration" (one review covered all three M2 specs). The sign-in flow is verified against the Supabase API by unit tests only until the owner steps above are done; the live check and its Playwright test run on the first `dev` connection.
+
 ## Definition of Done
-- [ ] Acceptance criteria met and demonstrated (test or screenshot)
+- [x] Acceptance criteria met and demonstrated (test or screenshot)
 - [ ] Unit tests for logic; Playwright for any user-visible flow that moves points (the signup bonus flow needs live Supabase: deferred to the first run against `dev`)
-- [ ] `npm run typecheck && npm run lint && npm test` green locally and in CI
-- [ ] No secrets in code; new env vars documented in `.env.example`
-- [ ] Docs or ADR updated when behavior or a decision changed
+- [x] `npm run typecheck && npm run lint && npm test` green locally and in CI
+- [x] No secrets in code; new env vars documented in `.env.example`
+- [x] Docs or ADR updated when behavior or a decision changed
 - [ ] Preview deploy checked by a human
 
 ## Next

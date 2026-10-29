@@ -1,4 +1,4 @@
-import { roundContracts } from "./rounding";
+import { noNegativeZero, roundContracts } from "./rounding";
 import type { MarketState, Outcome, PositionLike, Side } from "./types";
 
 export type EngineErrorCode =
@@ -162,7 +162,12 @@ export function readPosition(position: PositionLike): PositionLike {
       `cost basis must be an integer number of points within ±${MAX_POINTS}, got ${describe(costBasisPoints)}`,
     );
   }
-  return { contractsYes, contractsNo, costBasisPoints: costBasisPoints as number };
+  // −0 passes the checks above; the snapshot carries +0 so callers never see a signed zero.
+  return {
+    contractsYes: noNegativeZero(contractsYes),
+    contractsNo: noNegativeZero(contractsNo),
+    costBasisPoints: noNegativeZero(costBasisPoints as number),
+  };
 }
 
 /** {@link readPosition} for callers that only need the check. */

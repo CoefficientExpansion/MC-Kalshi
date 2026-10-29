@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assertPosition, EngineError } from "./errors";
+import { assertPosition, EngineError, readPosition } from "./errors";
 import { applyFill, EMPTY_POSITION, type Position, settlePayouts, voidRefunds } from "./positions";
 import { payout, voidRefund } from "./settlement";
 
@@ -201,5 +201,85 @@ describe("finding 4: holdings must be on the six-decimal grid", () => {
 
   it("accepts grid holdings, including −0", () => {
     expect(() => assertPosition(pos(1.499999, -0, 0))).not.toThrow();
+  });
+});
+
+describe("follow-up review: readPairs never inspects what caller code throws", () => {
+  const run = (positions: unknown) => [
+    codeOf(() => settlePayouts(positions as never, "YES")),
+    codeOf(() => voidRefunds(positions as never)),
+  ];
+  const throwingNext = (thrown: () => unknown) => ({
+    [Symbol.iterator]: () => ({
+      next: () => {
+        throw thrown();
+      },
+    }),
+  });
+
+  it("a thrown value whose getPrototypeOf throws becomes INVALID_STATE", () => {
+    const hostile = () =>
+      new Proxy(
+        {},
+        {
+          getPrototypeOf() {
+            throw 42;
+          },
+        },
+      );
+    expect(run(throwingNext(hostile))).toEqual(["INVALID_STATE", "INVALID_STATE"]);
+  });
+
+  it("a forged EngineError thrown by the iterator becomes a real INVALID_STATE", () => {
+    const forged = () => Object.create(EngineError.prototype);
+    expect(run(throwingNext(forged))).toEqual(["INVALID_STATE", "INVALID_STATE"]);
+  });
+
+  it("an EngineError raised inside the caller's generator becomes INVALID_STATE", () => {
+    const gen = {
+      *[Symbol.iterator]() {
+        yield ["a", applyFill(EMPTY_POSITION, { side: "YES", contracts: 0, costPoints: 1 })];
+      },
+    };
+    expect(run(gen)).toEqual(["INVALID_STATE", "INVALID_STATE"]);
+  });
+
+  it("an iterator factory that throws becomes INVALID_STATE", () => {
+    const factoryThrows = {
+      [Symbol.iterator]: () => {
+        throw new EngineError("INVALID_POINTS", "caller's own error");
+      },
+    };
+    expect(run(factoryThrows)).toEqual(["INVALID_STATE", "INVALID_STATE"]);
+  });
+
+  it("reads Symbol.iterator exactly once", () => {
+    let reads = 0;
+    const counted = Object.defineProperty({}, Symbol.iterator, {
+      get: () => {
+        reads++;
+        return function* () {
+          yield ["a", pos(1, 0, 3)] as const;
+        };
+      },
+    });
+    expect(settlePayouts(counted as never, "YES").get("a")).toBe(100);
+    expect(reads).toBe(1);
+  });
+
+  it("a well-formed pair with an invalid position keeps payout's and voidRefund's code", () => {
+    expect(run([["a", pos(-1, 0, 0)]])).toEqual(["INVALID_CONTRACTS", "INVALID_CONTRACTS"]);
+    expect(run([["a", pos(0, 0, 1.5)]])).toEqual(["INVALID_POINTS", "INVALID_POINTS"]);
+    expect(codeOf(() => payout(pos(-1, 0, 0), "YES"))).toBe("INVALID_CONTRACTS");
+    expect(codeOf(() => voidRefund(pos(0, 0, 1.5)))).toBe("INVALID_POINTS");
+  });
+});
+
+describe("follow-up review: readPosition normalises −0", () => {
+  it("returns +0 for −0 holdings and basis", () => {
+    const snap = readPosition(pos(-0, -0, -0));
+    expect(Object.is(snap.contractsYes, 0)).toBe(true);
+    expect(Object.is(snap.contractsNo, 0)).toBe(true);
+    expect(Object.is(snap.costBasisPoints, 0)).toBe(true);
   });
 });

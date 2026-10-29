@@ -1,5 +1,5 @@
 # M2b — Read-only market pages
-Status: in-progress · Milestone: M2 (part b, UI) · Research: docs/research/kalshi/market-page.md, docs/research/kalshi/event-grouping.md · ADRs: 0001, 0003
+Status: done (2026-10-29; human preview check pending) · Milestone: M2 (part b, UI) · Research: docs/research/kalshi/market-page.md, docs/research/kalshi/event-grouping.md · ADRs: 0001, 0003
 Integrated onto the M1 engine (main c311323) on 2026-10-29; see docs/specs/m1-engine.md, Ship decision.
 
 ## Problem
@@ -97,12 +97,16 @@ Deviations and decisions recorded while building (2026-10-29):
 4. Components, layout shell, `/`, `/markets/[slug]`, `not-found` — verify by: page tests with PGlite and the copy guard.
 5. Build with `DATABASE_URL` unset and screenshot at 390 px and 1280 px — verify by: screenshots.
 
+## Review
+
+See docs/specs/m2a-data-layer.md, "Review and integration" (one review covered all three M2 specs).
+
 ## Definition of Done
-- [ ] Acceptance criteria met and demonstrated (test or screenshot)
-- [ ] Unit tests for logic; Playwright for any user-visible flow that moves points (none here)
-- [ ] `npm run typecheck && npm run lint && npm test` green locally and in CI
-- [ ] No secrets in code; new env vars documented in `.env.example` (none added)
-- [ ] Docs or ADR updated when behavior or a decision changed
+- [x] Acceptance criteria met and demonstrated (test or screenshot)
+- [x] Unit tests for logic; Playwright for any user-visible flow that moves points (none here)
+- [x] `npm run typecheck && npm run lint && npm test` green locally and in CI
+- [x] No secrets in code; new env vars documented in `.env.example` (none added)
+- [x] Docs or ADR updated when behavior or a decision changed
 - [ ] Preview deploy checked by a human
 
 ## Next

@@ -1,5 +1,5 @@
 # M2a — Data layer: schema, ledger, seed
-Status: in-progress · Milestone: M2 (part a) · ADRs: 0001, 0003
+Status: done (2026-10-29; human preview check pending) · Milestone: M2 (part a) · ADRs: 0001, 0003
 Integrated onto the M1 engine (main c311323) on 2026-10-29; see docs/specs/m1-engine.md, Ship decision.
 
 ## Problem
@@ -111,12 +111,26 @@ Deviations and decisions recorded while building (2026-10-29):
 5. Market read queries — verify by: query tests.
 6. Seed script — verify by: idempotency test.
 
+## Review and integration (SOP-02 steps 6–7, 2026-10-29)
+
+Written by a cloud session on branch `claude/practical-johnson-4z906w`, reviewed from the owner's machine, and merged onto the M1 engine kept from `feat/m1-engine-r2` (see docs/specs/m1-engine.md, Ship decision). Covers this spec, docs/specs/m2b-auth.md and docs/specs/m2b-market-pages.md.
+
+| Pass | Verdict | Carried forward |
+|---|---|---|
+| Security audit (auth, RLS, migrations, ledger, CI) | GO, 0 Critical / 0 High | Owner: enable the Before User Created hook before setting the Supabase env vars in Production; email code expiry ≤ 10 min. M3: non-owner app role, REVOKE default grants, require `DATABASE_CA_CERT` in production (docs/specs/m3-trading.md checklist). M5: OTP lockout, cookie flags, security headers. |
+| Code review (five axes) | Approve | Fixed in the integration: seed resolution sources, one `<h1>` per page, plain-text college name on sign-in, explicit public statuses on `/`. Later: markets status/outcome CHECK, indexes, `server-only` imports. |
+| Test adequacy | Good enough for M2, not yet for M3 | Concurrency on real Postgres, RLS checked by switching roles, signup-bonus unique index, Supabase error mapping (m3 checklist). |
+| Engine comparison (281k differential quotes vs a 70-digit reference) | Keep the M1 engine; port the positions module | Done here: positions module and `displayPrice` ported with `EngineError` codes. |
+| Adversarial passes on the engine delta (2 cycles) | Cycle 1: 2 High, 3 Medium, all hostile-input or rounding-edge; cycle 2: 3 Medium in one error handler | All fixed with regression tests (`positions.hostile.test.ts`, `lmsr.mirror.test.ts`); the mirror test also fixed a one-point sell underpayment near ±1e6 in the M1 engine. |
+
+Verification: lint and typecheck clean; tests green locally (Windows) and in both CI jobs (gate and real Postgres 16); engine coverage 100 %; `npm run build` passes with no env vars; a fresh-clone simulation of Vercel's app-folder install resolves `@mc-kalshi/engine`; Vercel's own preview build of the integration branch succeeded. Production behaviour before the owner's Supabase setup: every page renders a "not connected" or "not set up" notice instead of failing.
+
 ## Definition of Done
-- [ ] Acceptance criteria met and demonstrated (test or screenshot)
-- [ ] Unit tests for logic; Playwright for any user-visible flow that moves points (none here)
-- [ ] `npm run typecheck && npm run lint && npm test` green locally and in CI
-- [ ] No secrets in code; new env vars documented in `.env.example`
-- [ ] Docs or ADR updated when behavior or a decision changed
+- [x] Acceptance criteria met and demonstrated (test or screenshot)
+- [x] Unit tests for logic; Playwright for any user-visible flow that moves points (none here)
+- [x] `npm run typecheck && npm run lint && npm test` green locally and in CI
+- [x] No secrets in code; new env vars documented in `.env.example`
+- [x] Docs or ADR updated when behavior or a decision changed
 - [ ] Preview deploy checked by a human
 
 ## Next

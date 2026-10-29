@@ -118,30 +118,65 @@ export function applyFill(position: Position, fill: Fill): Position {
 const NOT_PAIRS = "positions must be an iterable of [user, position] pairs";
 
 /**
- * Drains `positions` into an array of validated `[user, position]` pairs. A non-iterable input,
- * an element that is not a two-element array, or any error the iterator or a getter throws
- * becomes EngineError (INVALID_STATE), never a raw TypeError.
+ * Drains `positions` into an array of `[user, position]` pairs. `Symbol.iterator` is read and
+ * called exactly once and the iterator is driven by hand. Anything caller code throws (the
+ * iterator getter, the iterator factory, `next()`, or a getter on its result or on a pair) becomes
+ * a fresh EngineError (INVALID_STATE) without the thrown value being inspected, so a forged or
+ * hostile throwable cannot escape and an EngineError raised inside a caller's generator does not
+ * keep its own code. A non-iterable input or an element that is not a two-element array is also
+ * INVALID_STATE. Position contents are not checked here: payout()/voidRefund() check them.
  */
 function readPairs<K>(positions: unknown): Array<readonly [K, unknown]> {
   if (typeof positions !== "object" || positions === null) {
     throw new EngineError("INVALID_STATE", `${NOT_PAIRS}, got ${describe(positions)}`);
   }
-  const pairs: Array<readonly [K, unknown]> = [];
+  let factory: unknown;
   try {
-    if (typeof (positions as { [Symbol.iterator]?: unknown })[Symbol.iterator] !== "function") {
-      throw new EngineError("INVALID_STATE", NOT_PAIRS);
-    }
-    for (const entry of positions as Iterable<unknown>) {
-      if (!Array.isArray(entry) || entry.length !== 2) {
-        throw new EngineError("INVALID_STATE", `${NOT_PAIRS}, got an element ${describe(entry)}`);
-      }
-      pairs.push([entry[0] as K, entry[1]]);
-    }
-  } catch (e) {
-    if (e instanceof EngineError) throw e;
+    factory = (positions as { [Symbol.iterator]?: unknown })[Symbol.iterator];
+  } catch {
     throw new EngineError("INVALID_STATE", "positions could not be iterated");
   }
-  return pairs;
+  if (typeof factory !== "function") {
+    throw new EngineError("INVALID_STATE", NOT_PAIRS);
+  }
+  let iterator: unknown;
+  try {
+    iterator = factory.call(positions);
+  } catch {
+    throw new EngineError("INVALID_STATE", "positions could not be iterated");
+  }
+  const pairs: Array<readonly [K, unknown]> = [];
+  for (;;) {
+    let done: unknown;
+    let entry: unknown;
+    try {
+      const result = (iterator as Iterator<unknown>).next();
+      done = result.done;
+      entry = done ? undefined : result.value;
+    } catch {
+      throw new EngineError("INVALID_STATE", "positions could not be iterated");
+    }
+    if (done) return pairs;
+    pairs.push(readPair<K>(entry));
+  }
+}
+
+/** One element of `positions`: exactly a two-element array, else INVALID_STATE. */
+function readPair<K>(entry: unknown): readonly [K, unknown] {
+  let isPair: boolean;
+  let user: unknown;
+  let position: unknown;
+  try {
+    isPair = Array.isArray(entry) && entry.length === 2;
+    user = isPair ? (entry as unknown[])[0] : undefined;
+    position = isPair ? (entry as unknown[])[1] : undefined;
+  } catch {
+    throw new EngineError("INVALID_STATE", "a positions element could not be read");
+  }
+  if (!isPair) {
+    throw new EngineError("INVALID_STATE", `${NOT_PAIRS}, got an element ${describe(entry)}`);
+  }
+  return [user as K, position];
 }
 
 function assertNewUser<K>(seen: Map<K, number>, user: K): void {
@@ -154,8 +189,12 @@ function assertNewUser<K>(seen: Map<K, number>, user: K): void {
  * Per-user payout when the market resolves to `outcome`, each computed by {@link payout}
  * (floor of winning contracts × 100, favoring the pool). `positions` is any iterable of
  * `[userKey, position]` pairs (a `Map` works); the result has one entry per user, in input
- * order. Throws EngineError (INVALID_STATE) on a duplicate user or a malformed iterable. Users are
- * compared by Map key identity, so key by user id strings, never by objects.
+ * order. Users are compared by Map key identity, so key by user id strings, never by objects.
+ *
+ * Errors (always EngineError): a malformed iterable, any failure while iterating it, an element
+ * that is not a `[user, position]` pair, or a duplicate user → INVALID_STATE; a well-formed pair
+ * whose position is invalid → the code {@link payout} gives for it (INVALID_CONTRACTS or
+ * INVALID_POINTS).
  */
 export function settlePayouts<K>(
   positions: Iterable<readonly [K, Position]>,
@@ -174,6 +213,11 @@ export function settlePayouts<K>(
  * Per-user refund when a market is voided, each computed by {@link voidRefund}: exactly the net
  * cost basis. A user who sold for more than they paid has a negative basis, so their refund is
  * a debit. Same input/output shape as {@link settlePayouts}.
+ *
+ * Errors (always EngineError): a malformed iterable, any failure while iterating it, an element
+ * that is not a `[user, position]` pair, or a duplicate user → INVALID_STATE; a well-formed pair
+ * whose position is invalid → the code {@link voidRefund} gives for it (INVALID_CONTRACTS or
+ * INVALID_POINTS).
  */
 export function voidRefunds<K>(positions: Iterable<readonly [K, Position]>): Map<K, number> {
   const refunds = new Map<K, number>();
