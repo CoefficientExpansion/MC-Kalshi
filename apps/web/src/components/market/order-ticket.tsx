@@ -12,7 +12,6 @@ import {
   outcomeOf,
   type TicketLock,
   type TicketOrder,
-  type TicketTradeInput,
 } from "@/lib/ticket-order";
 import {
   buildTicketQuote,
@@ -23,7 +22,13 @@ import {
 } from "@/lib/ticket-quote";
 import { requoteRows, submitLabel, TICKET_COPY } from "@/lib/trade-copy";
 import { useMarketState } from "@/lib/use-market-state";
-import type { MarketStateDto, Requote, TradeResult, TradeSuccess } from "@/server/trade-types";
+import type {
+  MarketStateDto,
+  Requote,
+  TradeInput,
+  TradeResult,
+  TradeSuccess,
+} from "@/server/trade-types";
 import {
   OrderTicketView,
   type TicketGate,
@@ -49,7 +54,7 @@ export interface OrderTicketProps {
   /** The member is suspended (the page knows this from the profile). */
   readonly suspended?: boolean;
   /** placeTradeAction, passed in by the page. */
-  readonly submit: (input: TicketTradeInput) => Promise<TradeResult>;
+  readonly submit: (input: TradeInput) => Promise<TradeResult>;
   readonly onTraded?: (result: TradeSuccess) => void;
   readonly signInHref?: string;
   /** Server time at render (ms), so the first client render agrees on whether trading closed. */
@@ -351,6 +356,7 @@ export function LiveOrderTicket(props: OrderTicketProps) {
         qYes: result.market.qYes,
         qNo: result.market.qNo,
         probabilityYes: result.market.probabilityYes,
+        displayPrice: result.market.displayPrice,
         balance: result.balance,
         position: result.position,
       });

@@ -7,13 +7,6 @@ import { requoteMessage, successMessage, tradeErrorMessage } from "./trade-copy"
 // ticket (UI)": submit, key lifecycle, slippage UX). Pure, so the rules are unit-tested without a
 // browser; the component only holds the state.
 
-/**
- * The input the ticket sends. `expectedCostPoints` (the cost the ticket displayed) is required by
- * placeTrade for `buy_contracts`; declared here so the ticket compiles against either version of
- * `TradeInput` while the server side adds it.
- */
-export type TicketTradeInput = TradeInput & { readonly expectedCostPoints?: number };
-
 /** One order as the user confirmed it, without market or key. */
 export interface TicketOrder {
   readonly mode: TradeMode;
@@ -79,11 +72,7 @@ export function keyFor(
   return prev && prev.signature === sig ? prev : { key: newKey(), signature: sig };
 }
 
-export function buildTradeInput(
-  marketId: string,
-  order: TicketOrder,
-  key: string,
-): TicketTradeInput {
+export function buildTradeInput(marketId: string, order: TicketOrder, key: string): TradeInput {
   return { marketId, idempotencyKey: key, ...order };
 }
 

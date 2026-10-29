@@ -17,6 +17,7 @@ const market: MarketStateDto = {
   qYes: 0,
   qNo: 0,
   probabilityYes: 0.5,
+  displayPrice: 50,
 };
 const account = {
   balance: 10_000,

@@ -19,6 +19,10 @@ const STATUSES = new Set<string>([
 
 const finite = (x: unknown): x is number => typeof x === "number" && Number.isFinite(x);
 
+/** The engine's display price: a whole percent from 1 to 99. */
+const isDisplayPrice = (x: unknown): x is number =>
+  typeof x === "number" && Number.isInteger(x) && x >= 1 && x <= 99;
+
 /** The state body as a MarketStateDto with only known fields, or null when it is malformed. */
 export function parseMarketState(body: unknown): MarketStateDto | null {
   if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
@@ -26,7 +30,15 @@ export function parseMarketState(body: unknown): MarketStateDto | null {
   if (typeof r.status !== "string" || !STATUSES.has(r.status) || typeof r.closeAt !== "string") {
     return null;
   }
-  if (!finite(r.b) || !finite(r.qYes) || !finite(r.qNo) || !finite(r.probabilityYes)) return null;
+  if (
+    !finite(r.b) ||
+    !finite(r.qYes) ||
+    !finite(r.qNo) ||
+    !finite(r.probabilityYes) ||
+    !isDisplayPrice(r.displayPrice)
+  ) {
+    return null;
+  }
   const state: MarketStateDto = {
     status: r.status as MarketStateDto["status"],
     closeAt: r.closeAt,
@@ -34,6 +46,7 @@ export function parseMarketState(body: unknown): MarketStateDto | null {
     qYes: r.qYes,
     qNo: r.qNo,
     probabilityYes: r.probabilityYes,
+    displayPrice: r.displayPrice,
   };
   if (r.balance !== undefined && !finite(r.balance)) return null;
   let position: MarketStateDto["position"];
