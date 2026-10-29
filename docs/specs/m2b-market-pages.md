@@ -49,7 +49,7 @@ event grouping, comments, positions, balances, a live-updating price.
 - [x] Given closed, resolved (YES and NO), finalized and voided markets, when status is labeled, then each has a distinct text label, and an `open` market past `close_at` reads "Closed". (`lib/market-format.test.ts` > statusBadge: labels an open market, reads Closed for an open market whose close time has passed, gives each settled state its own text)
 - [x] Given any rendered page state, when its text is scanned, then it never contains "bet", "$" or "cash out" (page-level copy guard, as the hello page had). (`app/page.test.ts` > never says bet, $, or cash out in any state; `markets/[slug]/page.test.ts` > never says bet, $, or cash out; `lib/copy-guard.test.ts`)
 - [x] Given the pages at 390 px and 1280 px, when screenshotted, then there is no horizontal scroll, headings and landmarks are present, and colors come from theme tokens only (screenshot check, light mode). (screenshots at 390 and 1280 px in light and dark, `hscroll=false` on all; seeded-data shots rendered from PGlite views into the built page shell)
-- [x] `npm run typecheck && npm run lint && npm test && npm run build` green. (run locally with `DATABASE_URL` unset; CI not yet run)
+- [x] `npm run typecheck && npm run lint && npm test && npm run build` green. (run locally with `DATABASE_URL` unset; CI green on the branch)
 
 ## Data touched
 Reads only: `markets` joined to `categories` through `listMarkets` / `getMarketBySlug`
@@ -105,5 +105,7 @@ Deviations and decisions recorded while building (2026-10-29):
 - [ ] Preview deploy checked by a human
 
 ## Next
+- To reach done: seed `dev`, look at the pages on a Vercel preview at 390 and 1280 px, commit the screenshots, tick the Definition of Done.
+- Whether market pages require sign-in (SOP-09) is an owner decision (`docs/owner-todos.md`); `requireUser()` is ready.
 - The sign-in slice fills the header's account slot.
 - M3: real order ticket, price chart from `price_snapshots`, "Also trading".

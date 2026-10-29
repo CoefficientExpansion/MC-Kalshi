@@ -55,7 +55,7 @@ Out: Supabase Auth, sign-in UI, profile creation flow, market pages (M2b); `plac
 - [x] `grantSignupBonus` twice for one user credits once (test). (`ledger.test.ts` > credits house to user once; a second call is a no-op)
 - [x] `listMarkets` / `getMarketBySlug` return `probYes = 0.5`, `displayPrice = 50` for a seeded market (test). (`markets.test.ts` > returns a fresh market at probYes 0.5; attaches probYes and displayPrice to every row; `seed.test.ts` > serves fresh seeded markets at probYes 0.5)
 - [x] Seed runs twice against PGlite without duplicates (test). (`seed.test.ts` > is idempotent: a second run adds nothing)
-- [x] `npm run typecheck && npm run lint && npm test && npm run build` green. (run locally with `DATABASE_URL` unset; CI not yet run)
+- [x] `npm run typecheck && npm run lint && npm test && npm run build` green. (run locally with `DATABASE_URL` unset; CI green on the branch)
 
 ## Data touched
 All tables created. Ledger reasons used: `signup_bonus` (others defined, used from M3).
@@ -119,3 +119,4 @@ Deviations and decisions recorded while building (2026-10-29):
 - [ ] Preview deploy checked by a human
 
 ## Next
+- To reach done: run migrations and seed against the live `dev` project, confirm RLS on all 11 tables and `/api/health` `db: "ok"`, then tick the Definition of Done (owner steps in `docs/owner-todos.md`).

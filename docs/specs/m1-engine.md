@@ -100,5 +100,8 @@ Accepted, not fixed:
 - [x] Docs or ADR updated when behavior or a decision changed
 - [x] Preview deploy checked by a human (n/a: no UI change in M1)
 
+## Engine choice
+A second finished engine exists on `feat/m1-engine-r2`; the owner picks one (summary of both reviews and the recommended ports from r2 in `docs/owner-todos.md`, Decisions). Coverage gate on this branch now covers lines, statements, functions and branches.
+
 ## Next
-Merge the branch to `main` (squash). M3 must add a minimum trade size (see Review).
+Merge the branch to `main` (squash) once the engine is chosen. M3 must add a minimum trade size (see Review).

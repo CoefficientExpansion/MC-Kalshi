@@ -11,6 +11,7 @@
 5. Smoke test on prod with a moderator account: sign in, open a market, place a 10-point trade, view portfolio, check the audit log entry. Reverse nothing; a 10-point trade is noise.
 6. Tag: `git tag v0.<minor>.<patch>` and add a CHANGELOG line (date, what changed, migration yes/no).
 7. Announce in the beta channel if behavior changed.
+8. Push `main` to both remotes (`origin`, then `deploy`) or, if `main` was merged on GitHub, use "Sync fork" on `CoefficientExpansion/MC-Kalshi`. Vercel builds from the fork, so a missed push or sync means no deploy.
 
 ## Rollback
 - Code: Vercel → promote the previous deployment (seconds).

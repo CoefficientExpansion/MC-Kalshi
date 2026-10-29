@@ -33,13 +33,14 @@ leaderboard, "Also trading" block, realized-vs-unrealized P&L split (needs M4 se
 - [ ] Given two parallel trades (real Postgres), then they serialize on the market lock and invariants hold.
 - [ ] Given a closed, paused, suspended, or underfunded case, then the matching error code returns and no rows change.
 - [ ] Given a random trade sequence, then ledger sum is 0, balances equal the ledger, positions equal `q`.
-- [ ] Given the Playwright loop, then buy, sell, portfolio and the invariant route all pass; the test-session route is 404 when `VERCEL` is set.
+- [ ] Given the Playwright loop, then buy, sell, portfolio and the invariant route all pass; e2e sessions come from the Supabase admin API (if the fallback test-session route is used instead, it is 404 when `VERCEL` is set).
 - [ ] No UI string contains "bet", "$", "¢" or "cash out".
 
 ## Key decisions
 1. **Core vs action.** `server/trading.ts` exports `placeTrade(db, userId, input, opts?)` (all logic, testable
    with any `AnyDb`). `app/markets/[slug]/actions.ts` (`"use server"`) resolves the session user via the sign-in
-   slice's `getSessionUser()`, calls the core, returns its result. Next's built-in Origin check covers CSRF.
+   slice's `requireUser()` / `getCurrentUser()` (`apps/web/src/server/auth.ts`; `getCurrentUser` returns `null`
+   for a signed-out session, one with no profile, or one whose email is no longer allowed), calls the core, returns its result. Next's built-in Origin check covers CSRF.
 2. **Results are values, not exceptions.** Expected failures return `{ ok: false, code, message, ... }`; only bugs throw.
 3. **Lock order is market, then balances row.** Architecture §6 locks only the market, but a user trading two
    markets at once would race on their balance. The balances row is also locked `FOR UPDATE` (conflict #1 below).
@@ -67,14 +68,17 @@ Order of operations (any failure rolls the whole transaction back and writes not
    An engine `RangeError` on user input (selling more than `q`, too large) maps to `invalid_input`; on stored
    state it is `internal_error` and is logged.
 7. Checks, in this order:
-   a. `withinSlippage(expectedAvgPrice, quote, maxSlippage)` else `slippage_exceeded` with a fresh `requote`.
-   b. Size rules (below) -> `trade_too_small` / `trade_too_large`.
+   a. Size rules (below) -> `trade_too_small` / `trade_too_large`. These run first because the engine's
+      `avgPrice` can exceed 100 on dust, which would make the 0-100 `expectedAvgPrice` bound and the slippage
+      check meaningless.
+   b. `withinSlippage(expectedAvgPrice, quote, maxSlippage)` else `slippage_exceeded` with a fresh `requote`.
    c. Buy: `balance >= quote.costPoints` else `insufficient_balance {balance, needed}`.
       Sell: held contracts on that side >= amount else `insufficient_position {held}`.
 8. `INSERT INTO trades … ON CONFLICT (user_id, idempotency_key) DO NOTHING RETURNING *`. No row means another
    transaction won the unique constraint (for example the same key sent for two different markets at once):
-   roll back, re-read the original, and return it with `replayed: true` if market, side and direction match,
-   else `idempotency_key_reused`. A replay never re-validates market status, balance or slippage.
+   roll back, re-read the original, and return it with `replayed: true` only if the full original input matches
+   (market, side, mode, amount, `expectedAvgPrice`, `maxSlippage`; stored as `trades.request_fingerprint`,
+   see Data touched), else `idempotency_key_reused`. The pre-transaction and step 3 lookups apply the same comparison. A replay never re-validates market status, balance or slippage.
 9. `applyFill(position, quote)`; upsert `positions` (`ON CONFLICT (market_id, user_id) DO UPDATE`).
 10. `UPDATE markets SET q_yes, q_no` from `quote.nextState` (absolute values; exact multiples of 1e-6).
 11. `postTransfer(tx, { entries: [user −costPoints, market_pool(marketId) +costPoints], reason: "trade",
@@ -115,6 +119,7 @@ call site and error code do not change.
 
 **Who may trade.** Signed-in, not suspended, market `open` and before `close_at`, balance sufficient for a buy,
 and a sell only up to the contracts held on that side. A user may hold both YES and NO in one market.
+The DB `CHECK (points >= 0)` is the backstop for the balance check, not a replacement.
 
 ## Order ticket (UI)
 Pattern adopted from `order-ticket.md` (behavior only), tokens and copy from `docs/design/theme.md`.
@@ -195,7 +200,8 @@ rows, balance, snapshot):
 6. Size rules: 0.009 contracts rejected; 0.01 accepted; dust close-out of 0.004 contracts accepted; buy above
    `min(5000, 50·b)` rejected; `payoutIfWin < costPoints` rejected.
 7. Idempotency: same key twice -> one trade, `replayed: true`, balance debited once; same key after the market
-   closed still returns the original; same key with a different side -> `idempotency_key_reused`; same key from two
+   closed still returns the original; same key with a different side, amount, mode or `expectedAvgPrice` ->
+   `idempotency_key_reused` (nothing written); same key from two
    users are independent; `Promise.all` of 5 identical calls -> one trade.
 8. Numeric boundary: `parseNumeric`/`formatNumeric` round trip for 1e-6, 0.1+0.2-style sums, 2e9; q after 1,000 tiny trades is still an exact multiple of 1e-6.
 9. `TRADING_PAUSED`, rate limit (21st trade in a minute), balance row missing (new user with 0 points).
@@ -204,10 +210,12 @@ rows, balance, snapshot):
 **Property test (fast-check, PGlite, one DB per file, a fresh market per run).** Random sequences (<= 12) of
 {user from 3, side, mode, amount} against 1–2 markets. After each run: `ledgerSum == 0`, no balance mismatches,
 `checkTradingInvariants` ok, pool loss `<= 100·b·ln 2`, no `internal_error`, every rejection has a taxonomy code,
-and no user holds negative contracts or a negative balance (affordability is enforced here, not by a CHECK).
+and no user holds negative contracts or a negative balance (affordability is enforced by `placeTrade`; the CHECK is the backstop).
 
 **Concurrency (real Postgres).** PGlite runs one connection, so it cannot exercise row locks; parallel calls there
-only prove logic. One integration file `trading.concurrency.test.ts` runs when `TEST_DATABASE_URL` is set
+only prove logic. CI already has the `postgres:16` service and sets `TEST_DATABASE_URL` (added with the review fixes;
+it already gates the migration, append-only, RLS, auth-hook and row-locking integration tests), so these tests need no
+new CI plumbing. One integration file `trading.concurrency.test.ts` runs when `TEST_DATABASE_URL` is set
 (`describe.skipIf`; skipped locally with a console note) and creates a throwaway database per file:
 - Two parallel trades on one market: both succeed, the second's `prob_before` equals the first's `prob_after`, invariants hold.
 - **Lock witness:** hold `SELECT … FOR UPDATE` on the market in an outside connection, start `placeTrade`, poll
@@ -215,15 +223,18 @@ only prove logic. One integration file `trading.concurrency.test.ts` runs when `
 - One user, two markets, in parallel, balance enough for one: exactly one succeeds, the other is `insufficient_balance`.
 - Same idempotency key sent 5x in parallel (and for two markets at once): one trade row, every call gets that trade.
 - 20 mixed trades from 5 users on 2 markets in parallel: no deadlock, invariants hold.
-Add to `.github/workflows/ci.yml` (proposed; not part of this spec's commit): a `postgres:16` service container on the
-`gate` job (`POSTGRES_PASSWORD`, `ports: ["5432:5432"]`, `--health-cmd "pg_isready -U postgres"` with interval 5 s
-and 10 retries) and `TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres` in the job `env`.
+The `e2e` job (below) reuses the same service shape: `postgres:16`, `POSTGRES_PASSWORD`, `ports: ["5432:5432"]`,
+`--health-cmd "pg_isready -U postgres"`, and `TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres`.
 
 **Playwright e2e** (`apps/web/e2e/trade-loop.spec.ts`, new `@playwright/test` dev dependency, `npm run e2e`, separate
 CI job `e2e`: Postgres service, `db:migrate`, `db:seed`, `next build && next start`, `npx playwright install --with-deps chromium`).
-Authentication without email: a test-only route `POST /api/test/session` (body: email) that creates the profile with
-`grantSignupBonus` and sets an HMAC-signed `e2e-session` cookie; `getSessionUser()` accepts that cookie only when
-`isE2EAuthEnabled()` is true. **Guard (one function, unit-tested):** `E2E_AUTH_BYPASS === "1"` AND `E2E_AUTH_SECRET`
+Authentication without email, preferred: the test setup creates the user and a real session through the Supabase
+service role / admin API (`auth.admin.createUser` + `generateLink`/`verifyOtp`, or an admin-minted session) against a
+throwaway project or the local stack, then injects the resulting auth cookies into Playwright. No bypass code ships
+in the app bundle. **Fallback only if that proves impractical:** a test-only route `POST /api/test/session` (body:
+email) that creates the profile with `grantSignupBonus` and sets an HMAC-signed `e2e-session` cookie;
+`getCurrentUser()` accepts that cookie only when `isE2EAuthEnabled()` is true. **Guard (one function, unit-tested,
+including a case with `VERCEL=1`):** `E2E_AUTH_BYPASS === "1"` AND `E2E_AUTH_SECRET`
 is set AND `process.env.VERCEL` is unset. `NODE_ENV` is not usable because `next start` forces `production`; Vercel
 always sets `VERCEL`, so the bypass cannot run on production or previews even if the flag leaks there. The route returns
 404 when the guard is false. Tests:
@@ -238,27 +249,35 @@ always sets `VERCEL`, so the bypass cannot run on production or previews even if
 - Reads: `profiles`, `markets`, `balances`, `positions`, `trades`, `price_snapshots`, `ledger_entries`, `categories`.
 - Writes per trade: `trades` (1), `positions` (upsert), `markets.q_yes/q_no`, `ledger_entries` (2, reason `trade`,
   `ref_type = 'trade'`), `balances` (via `postTransfer`), `price_snapshots` (1). Ledger reasons used: `trade`.
-- Migration: one, `trades(user_id, created_at)` index for the rate limit and portfolio history. No new tables or columns.
+- Migration (one): `trades(user_id, created_at)` index for the rate limit and portfolio history; `CHECK (points >= 0)`
+  on `balances` (defense in depth beside `placeTrade`'s balance check; see architecture §6 "Balance floor", which is
+  **proposed, owner to confirm** together with the M4 void-debit policy, so confirm before this ships); and a
+  nullable `trades.request_fingerprint` text column holding a hash of the normalized input, so a replay can compare
+  the full original input. No new tables.
 - Env vars (add each to `apps/web/.env.example`): `CRON_SECRET`,
   `TRADING_PAUSED` (already in SOP-07), `TRADE_RATE_LIMIT_PER_MIN` (optional, 20), `TEST_DATABASE_URL` (CI/tests only),
   `E2E_AUTH_BYPASS`, `E2E_AUTH_SECRET` (e2e only; never set on Vercel).
 
 ## Risks / open questions
 Conflicts found between architecture and code (resolved here, decisions recorded):
-1. §6 locks only the market; `postTransfer` upserts `balances` with no floor and M2a deliberately has no `points >= 0`
-   CHECK. Two markets traded at once would overdraw. Resolved: lock the balances row (step 5), test it on real Postgres.
+1. §6 locked only the market; `postTransfer` upserts `balances` with no floor and M2a deliberately has no `points >= 0`
+   CHECK. Two markets traded at once would overdraw. Resolved: lock the balances row (step 5), test it on real Postgres,
+   and add the CHECK in this slice's migration (architecture §6 "Balance floor"; owner to confirm, including how M4
+   voids fund a user whose `void_refund` is a debit larger than their balance).
 2. §6 step 5 says a duplicate key "returns the original", but the unique key is `(user_id, key)` while the lock is per
    market, so a duplicate key across two markets is not serialized. Resolved: `ON CONFLICT DO NOTHING` plus re-read (step 8).
 3. §4/§7 `positions.cost_basis_points` is per market, not per side, so per-side average cost is unavailable (portfolio shows market-level basis only).
-4. §6 says the close cron runs "every minute"; SOP-07 says Hobby allows it. Vercel Hobby cron is, to my knowledge,
-   once per day. Verify before M4 relies on it; the invariant job only needs daily, and GitHub Actions `schedule` is the fallback.
+4. §6 says the close cron runs "every minute"; Vercel Hobby cron is, to my knowledge, once per day (SOP-07 corrected).
+   Verify before M4 relies on it (owner to-do: Pro vs GitHub Actions `schedule`); the invariant job only needs daily.
 5. M1 spec says M3 must enforce a minimum trade size: done above. The engine itself still accepts 1e-6 contracts.
 6. The market-page research note uses `¢`; the theme forbids currency signs. Ticket uses "pts" and "%".
 Open:
 - Positions-vs-q after resolve/void is undefined until M4 (zero positions? keep q?); the check skips those statuses.
 - Per-trade cap 5,000 and `maxSlippage` choices are proposals; the human may tune them (constants in one file).
 - Supabase free tier pauses idle projects; the daily job also keeps `prod` awake (SOP-07).
-- Depends on the sign-in slice for `getSessionUser()`; core `placeTrade` and tests do not, so build them first.
+- Depends on the sign-in slice for `requireUser()` / `getCurrentUser()`; core `placeTrade` and tests do not, so build them first.
+- Whether market pages require sign-in (SOP-09 says yes for MVP; currently public) is an owner decision; the ticket's signed-out state assumes pages stay public until it is made.
+- Engine edge: `MIN_TRADE_CONTRACTS` could live in `packages/engine` so the size rule sits with the math; today it is `server/trade-limits.ts`. Port the typed `EngineError` codes (engine choice, `docs/owner-todos.md`) before step 6 relies on them; until then match `RangeError`.
 
 ## Tasks
 Parallel chunks A–D start after task 0. Each chunk can go to a separate implementer.
@@ -277,10 +296,10 @@ Parallel chunks A–D start after task 0. Each chunk can go to a separate implem
 **D. Invariants and CI**
 9. `checkTradingInvariants` + deliberate-corruption tests (corrupt rows directly in a test DB, for example `UPDATE markets SET q_yes` or an extra `positions` row; the append-only triggers cover only `ledger_entries` and `trades`) — verify by: each issue type is detected.
 10. Cron route, `vercel.json`, `CRON_SECRET` check. Verify by: 401/200/500 route tests; log line shape.
-11. CI Postgres service, concurrency suite (lock witness, balance race, key race). Verify by: green in CI; skipped with a note locally.
+11. Concurrency suite on the existing CI Postgres service (lock witness, balance race, key race). Verify by: green in CI; skipped with a note locally.
 **E. Integration (last)**
-12. Test-session route, `isE2EAuthEnabled` + guard tests, Playwright config, trade-loop spec, CI `e2e` job. Verify by: e2e green in CI; with `VERCEL=1` the test route returns 404.
-13. Adversarial review (doubt-driven) of `placeTrade`; `/security-review`; update `docs/architecture.md` §6/§9 for the balances lock and idempotency order; SOP-06 invariant-alert steps. Verify by: findings fixed or recorded here.
+12. E2E auth via the service role / admin API (fallback: test-session route with `isE2EAuthEnabled` + guard tests), Playwright config, trade-loop spec, CI `e2e` job. Verify by: e2e green in CI; with `VERCEL=1` the test route returns 404.
+13. Adversarial review (doubt-driven) of `placeTrade`; `/security-review`; confirm `docs/architecture.md` §6/§9 (balances lock, idempotency order, balance floor) still match the code; SOP-06 invariant-alert steps. Verify by: findings fixed or recorded here.
 
 ## Definition of Done
 - [ ] Acceptance criteria met and demonstrated (test or screenshot)

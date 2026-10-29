@@ -60,7 +60,7 @@ a magic-link or OAuth callback (the code flow needs none), custom SMTP (SOP-07, 
 - [x] Sign-in and account copy never says bet, `$` or cash out (test). (`sign-in/page.test.ts`; `components/account-control.test.ts`)
 - [x] With all Supabase variables unset: `npm run build` passes and `/sign-in` renders the "not configured" notice (build + screenshot). (built with `DATABASE_URL` and Supabase vars unset; `next start` served `/sign-in` with the notice, `/` 200; screenshots in the session scratchpad, not committed)
 - [x] `npm run db:generate` reports no schema drift (run by hand: "No schema changes, nothing to migrate").
-- [x] `npm run typecheck && npm run lint && npm test && npm run build` green locally (CI not yet run).
+- [x] `npm run typecheck && npm run lint && npm test && npm run build` green locally; see branch CI.
 
 Not covered by any test (needs live Supabase): a real code email, a real `verifyOtp`, the hook rejecting a
 real sign-up, proxy cookie refresh. With a deliberately unreachable Supabase URL, the app showed the
@@ -173,6 +173,7 @@ pages below were read from their source in the public `supabase/supabase` reposi
 - [ ] Preview deploy checked by a human
 
 ## Next
-- Owner: the Supabase steps above, then sign in once with a `@my.maryvillecollege.edu` address and
+- `getCurrentUser()` also treats a session whose email is no longer allowed, or differs from the profile's, as signed out (covers email changes, which the hook does not see).
+- Owner: the Supabase steps above (hook on in both `dev` and `prod`, custom SMTP before real users), then sign in once with a `@my.maryvillecollege.edu` address and
   once with a gmail address (must be refused) on `dev`.
 - M5: rate limiting for code requests, profile editing, leaderboard opt-out.
