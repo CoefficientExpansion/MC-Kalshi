@@ -6,6 +6,7 @@ the header: `draft` → `in-progress` → `done` (or `dropped`).
 | Spec | Milestone | Status |
 |---|---|---|
 | [m0-scaffold.md](m0-scaffold.md) | M0 | done |
+| [../design/theme.md](../design/theme.md) | cross-cutting | done |
 
 ## Template
 ```markdown

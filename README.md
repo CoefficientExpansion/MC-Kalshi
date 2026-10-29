@@ -18,6 +18,7 @@ docs/skills-matrix.md     Claude Code skills/plugins on/off for this project
 docs/adr/                 architecture decision records (0001–0005)
 docs/sops/                standard operating procedures
 docs/specs/               feature specs (one per slice)
+docs/design/              design reference: theme tokens, type, YES/NO colors, copy rules
 docs/research/kalshi/     REA evidence + design notes from studying Kalshi
 scripts/setup-rea.ps1     installs REA for this project only and registers the MCP server
 .claude/settings.json     project-scoped plugin/skill overrides

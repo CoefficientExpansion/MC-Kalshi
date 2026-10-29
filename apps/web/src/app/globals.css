@@ -1,24 +1,91 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+/*
+ * Maryville College visual identity for MC-Kalshi (unofficial student project).
+ * Colors, type and tone only: no college logo, wordmark, tartan or athletic marks.
+ * Every token here is documented in docs/design/theme.md; keep the two in sync.
+ */
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+:root {
+  /* Brand pair */
+  --brand: #640a28;
+  --brand-dark: #46071c;
+  --brand-ink: #640a28;
+  --on-brand: #ffffff;
+  --accent: #ff6500;
+  --accent-dark: #bf3c00;
+  --on-accent: #212529;
+
+  /* Status */
+  --success: #65aa2f;
+  --warning: #fbc01d;
+  --danger: #600015;
+  --teal: #154440;
+
+  /* Surfaces and text */
+  --background: #ffffff;
+  --surface: #f8f9fa;
+  --border: #dee2e6;
+  --foreground: #212529;
+  --muted: #6c757d;
+
+  /* Market outcomes: never the brand pair, always shown with their label */
+  --yes: #1d5fa8;
+  --no: #b0306a;
+  --on-yes: #ffffff;
+  --on-no: #ffffff;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --brand-ink: #f2a7bc;
+    --danger: #f28b8b;
+
+    --background: #14090d;
+    --surface: #21131a;
+    --border: #3a2a31;
+    --foreground: #f8f9fa;
+    --muted: #adb5bd;
+
+    --yes: #5ba3e6;
+    --no: #e07ab0;
+    --on-yes: #14090d;
+    --on-no: #14090d;
   }
+}
+
+@theme inline {
+  --color-brand: var(--brand);
+  --color-brand-dark: var(--brand-dark);
+  --color-brand-ink: var(--brand-ink);
+  --color-on-brand: var(--on-brand);
+  --color-accent: var(--accent);
+  --color-accent-dark: var(--accent-dark);
+  --color-on-accent: var(--on-accent);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-teal: var(--teal);
+
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+
+  --color-yes: var(--yes);
+  --color-no: var(--no);
+  --color-on-yes: var(--on-yes);
+  --color-on-no: var(--on-no);
+
+  /* --font-archivo and --font-barlow-condensed are set by next/font in layout.tsx */
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-barlow-condensed), "Arial Narrow", ui-sans-serif, sans-serif;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
 }
