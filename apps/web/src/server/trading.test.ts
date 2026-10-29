@@ -13,13 +13,14 @@ import {
 } from "@/db/schema";
 import { openTestDb, type TestDbHandle } from "@/db/test-db";
 import type { AnyDb } from "@/db/types";
+import { checkTradingInvariants } from "./invariants";
 import { checkLedgerInvariants, grantSignupBonus } from "./ledger";
 import { parseNumeric } from "./numeric";
 import { TRADE_ERROR_CODES, type TradeResult, type TradeSuccess } from "./trade-types";
 import { type PlaceTradeOptions, placeTrade } from "./trading";
 
 // placeTrade on a fresh database per test (PGlite locally, a throwaway real database in the CI
-// `postgres` job). Every test checks the ledger invariants afterwards (afterEach), and every
+// `postgres` job). Every test checks the ledger and trading invariants afterwards (afterEach), and every
 // success is checked against the rows it wrote (expectBooked).
 
 const user = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -46,6 +47,9 @@ afterEach(async () => {
       const inv = await checkLedgerInvariants(h.db);
       expect(inv.ledgerSum).toBe(0);
       expect(inv.mismatches).toEqual([]);
+      const trading = await checkTradingInvariants(h.db);
+      expect(trading.issues).toEqual([]);
+      expect(trading.ok).toBe(true);
     }
   } finally {
     await Promise.all(open.map((h) => h.close()));
@@ -347,12 +351,19 @@ describe("placeTrade: fills", () => {
   });
 });
 
+/** Puts back the untraded market's q after a test stored an off-range value on purpose. */
+async function restoreQ(ctx: Ctx): Promise<void> {
+  await ctx.db.update(markets).set({ qYes: "0" }).where(eq(markets.id, ctx.marketId));
+}
+
 describe("placeTrade: rejections write nothing", () => {
   interface Case {
     readonly code: (typeof TRADE_ERROR_CODES)[number];
     /** Extra setup on the context; returns the call to make. */
     readonly arrange: (ctx: Ctx) => Promise<() => Promise<TradeResult>>;
     readonly extra?: Record<string, unknown>;
+    /** Undoes deliberate corruption from `arrange`, so the afterEach invariant check sees valid data. */
+    readonly restore?: (ctx: Ctx) => Promise<void>;
   }
 
   const cases: Case[] = [
@@ -458,6 +469,7 @@ describe("placeTrade: rejections write nothing", () => {
         vi.spyOn(console, "error").mockImplementation(() => {});
         return () => trade(ctx);
       },
+      restore: (ctx) => restoreQ(ctx),
     },
   ];
 
@@ -473,6 +485,7 @@ describe("placeTrade: rejections write nothing", () => {
     expect(result).toMatchObject({ ok: false, code: c.code, message: expect.any(String) });
     if (c.extra) expect(result).toMatchObject(c.extra);
     expect(await snapshotAll(ctx.h)).toEqual(before);
+    await c.restore?.(ctx);
   });
 
   it("logs an internal error with ids only and a generic message", async () => {
@@ -490,6 +503,7 @@ describe("placeTrade: rejections write nothing", () => {
       marketId: ctx.marketId,
       error: "NumericBoundaryError",
     });
+    await restoreQ(ctx);
   });
 
   it("reads TRADING_PAUSED from the environment by default", async () => {

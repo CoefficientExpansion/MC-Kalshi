@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { openTestDb, type TestDbHandle } from "@/db/test-db";
 import type { AnyDb } from "@/db/types";
+import { checkTradingInvariants } from "./invariants";
 import { checkLedgerInvariants, grantSignupBonus } from "./ledger";
 import { parseNumeric } from "./numeric";
 import { quoteTrade } from "./quote";
@@ -164,6 +165,9 @@ describe("placeTrade property", () => {
         const inv = await checkLedgerInvariants(db);
         expect(inv.ledgerSum).toBe(0);
         expect(inv.mismatches).toEqual([]);
+        const trading = await checkTradingInvariants(db);
+        expect(trading.issues).toEqual([]);
+        expect(trading.ok).toBe(true);
 
         const bal = await db.select().from(balances).where(inArray(balances.userId, users));
         for (const row of bal) expect(row.points).toBeGreaterThanOrEqual(0);
