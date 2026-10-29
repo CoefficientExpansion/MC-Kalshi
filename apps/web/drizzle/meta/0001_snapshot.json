@@ -1,0 +1,1102 @@
+{
+  "id": "458de807-2838-4a06-9661-a434ee5f3bd1",
+  "prevId": "5cfd79af-cc50-484c-ae3b-450bf105b090",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.audit_log": {
+      "name": "audit_log",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "name": "audit_log_id_seq",
+            "increment": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "startWith": "1",
+            "cache": "1",
+            "cycle": false,
+            "schema": "public",
+            "type": "always"
+          }
+        },
+        "actor_id": {
+          "name": "actor_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_type": {
+          "name": "target_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "target_id": {
+          "name": "target_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "audit_log_actor_id_profiles_id_fk": {
+          "name": "audit_log_actor_id_profiles_id_fk",
+          "tableFrom": "audit_log",
+          "columnsFrom": [
+            "actor_id"
+          ],
+          "tableTo": "profiles",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.balances": {
+      "name": "balances",
+      "schema": "",
+      "columns": {
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "points": {
+          "name": "points",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "balances_user_id_profiles_id_fk": {
+          "name": "balances_user_id_profiles_id_fk",
+          "tableFrom": "balances",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "profiles",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.categories": {
+      "name": "categories",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "categories_slug_unique": {
+          "name": "categories_slug_unique",
+          "columns": [
+            "slug"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.disputes": {
+      "name": "disputes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "market_id": {
+          "name": "market_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "dispute_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "decided_by": {
+          "name": "decided_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decision_note": {
+          "name": "decision_note",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "disputes_market_id_markets_id_fk": {
+          "name": "disputes_market_id_markets_id_fk",
+          "tableFrom": "disputes",
+          "columnsFrom": [
+            "market_id"
+          ],
+          "tableTo": "markets",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "disputes_user_id_profiles_id_fk": {
+          "name": "disputes_user_id_profiles_id_fk",
+          "tableFrom": "disputes",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "profiles",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "disputes_decided_by_profiles_id_fk": {
+          "name": "disputes_decided_by_profiles_id_fk",
+          "tableFrom": "disputes",
+          "columnsFrom": [
+            "decided_by"
+          ],
+          "tableTo": "profiles",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.ledger_entries": {
+      "name": "ledger_entries",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "name": "ledger_entries_id_seq",
+            "increment": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "startWith": "1",
+            "cache": "1",
+            "cycle": false,
+            "schema": "public",
+            "type": "always"
+          }
+        },
+        "account_type": {
+          "name": "account_type",
+          "type": "account_type",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "delta_points": {
+          "name": "delta_points",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "ledger_reason",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ref_type": {
+          "name": "ref_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ref_id": {
+          "name": "ref_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "ledger_entries_account_idx": {
+          "name": "ledger_entries_account_idx",
+          "columns": [
+            {
+              "expression": "account_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        },
+        "ledger_entries_signup_bonus_uq": {
+          "name": "ledger_entries_signup_bonus_uq",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "where": "\"ledger_entries\".\"reason\" = 'signup_bonus' and \"ledger_entries\".\"account_type\" = 'user'",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "ledger_entries_house_account": {
+          "name": "ledger_entries_house_account",
+          "value": "\"ledger_entries\".\"account_type\" <> 'house' or \"ledger_entries\".\"account_id\" = '00000000-0000-0000-0000-000000000000'"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.markets": {
+      "name": "markets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rules": {
+          "name": "rules",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "market_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'proposed'"
+        },
+        "outcome": {
+          "name": "outcome",
+          "type": "outcome",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "b": {
+          "name": "b",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 100
+        },
+        "q_yes": {
+          "name": "q_yes",
+          "type": "numeric(18, 6)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "q_no": {
+          "name": "q_no",
+          "type": "numeric(18, 6)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "close_at": {
+          "name": "close_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolve_by": {
+          "name": "resolve_by",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by": {
+          "name": "created_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_by": {
+          "name": "resolved_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolution_source": {
+          "name": "resolution_source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "opened_at": {
+          "name": "opened_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "closed_at": {
+          "name": "closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "finalized_at": {
+          "name": "finalized_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {
+        "markets_status_close_at_idx": {
+          "name": "markets_status_close_at_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "close_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "markets_category_id_categories_id_fk": {
+          "name": "markets_category_id_categories_id_fk",
+          "tableFrom": "markets",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "tableTo": "categories",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "markets_created_by_profiles_id_fk": {
+          "name": "markets_created_by_profiles_id_fk",
+          "tableFrom": "markets",
+          "columnsFrom": [
+            "created_by"
+          ],
+          "tableTo": "profiles",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "markets_resolved_by_profiles_id_fk": {
+          "name": "markets_resolved_by_profiles_id_fk",
+          "tableFrom": "markets",
+          "columnsFrom": [
+            "resolved_by"
+          ],
+          "tableTo": "profiles",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "markets_slug_unique": {
+          "name": "markets_slug_unique",
+          "columns": [
+            "slug"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "markets_b_range": {
+          "name": "markets_b_range",
+          "value": "\"markets\".\"b\" between 50 and 500"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.positions": {
+      "name": "positions",
+      "schema": "",
+      "columns": {
+        "market_id": {
+          "name": "market_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contracts_yes": {
+          "name": "contracts_yes",
+          "type": "numeric(18, 6)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "contracts_no": {
+          "name": "contracts_no",
+          "type": "numeric(18, 6)",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'0'"
+        },
+        "cost_basis_points": {
+          "name": "cost_basis_points",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "positions_market_id_markets_id_fk": {
+          "name": "positions_market_id_markets_id_fk",
+          "tableFrom": "positions",
+          "columnsFrom": [
+            "market_id"
+          ],
+          "tableTo": "markets",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "positions_user_id_profiles_id_fk": {
+          "name": "positions_user_id_profiles_id_fk",
+          "tableFrom": "positions",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "profiles",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "positions_market_id_user_id_pk": {
+          "name": "positions_market_id_user_id_pk",
+          "columns": [
+            "market_id",
+            "user_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "positions_contracts_nonnegative": {
+          "name": "positions_contracts_nonnegative",
+          "value": "\"positions\".\"contracts_yes\" >= 0 and \"positions\".\"contracts_no\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.price_snapshots": {
+      "name": "price_snapshots",
+      "schema": "",
+      "columns": {
+        "market_id": {
+          "name": "market_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "at": {
+          "name": "at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "prob_yes": {
+          "name": "prob_yes",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "price_snapshots_market_at_idx": {
+          "name": "price_snapshots_market_at_idx",
+          "columns": [
+            {
+              "expression": "market_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "price_snapshots_market_id_markets_id_fk": {
+          "name": "price_snapshots_market_id_markets_id_fk",
+          "tableFrom": "price_snapshots",
+          "columnsFrom": [
+            "market_id"
+          ],
+          "tableTo": "markets",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.profiles": {
+      "name": "profiles",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "role": {
+          "name": "role",
+          "type": "role",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'member'"
+        },
+        "suspended_at": {
+          "name": "suspended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "leaderboard_opt_out": {
+          "name": "leaderboard_opt_out",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "profiles_email_unique": {
+          "name": "profiles_email_unique",
+          "columns": [
+            "email"
+          ],
+          "nullsNotDistinct": false
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.settings": {
+      "name": "settings",
+      "schema": "",
+      "columns": {
+        "key": {
+          "name": "key",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_by": {
+          "name": "updated_by",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "settings_updated_by_profiles_id_fk": {
+          "name": "settings_updated_by_profiles_id_fk",
+          "tableFrom": "settings",
+          "columnsFrom": [
+            "updated_by"
+          ],
+          "tableTo": "profiles",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.trades": {
+      "name": "trades",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "market_id": {
+          "name": "market_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "side": {
+          "name": "side",
+          "type": "side",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "contracts": {
+          "name": "contracts",
+          "type": "numeric(18, 6)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cost_points": {
+          "name": "cost_points",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prob_before": {
+          "name": "prob_before",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prob_after": {
+          "name": "prob_after",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "trades_user_idempotency_key_uq": {
+          "name": "trades_user_idempotency_key_uq",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "idempotency_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "with": {},
+          "method": "btree",
+          "concurrently": false
+        }
+      },
+      "foreignKeys": {
+        "trades_market_id_markets_id_fk": {
+          "name": "trades_market_id_markets_id_fk",
+          "tableFrom": "trades",
+          "columnsFrom": [
+            "market_id"
+          ],
+          "tableTo": "markets",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        },
+        "trades_user_id_profiles_id_fk": {
+          "name": "trades_user_id_profiles_id_fk",
+          "tableFrom": "trades",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "tableTo": "profiles",
+          "columnsTo": [
+            "id"
+          ],
+          "onUpdate": "no action",
+          "onDelete": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "trades_contracts_nonzero": {
+          "name": "trades_contracts_nonzero",
+          "value": "\"trades\".\"contracts\" <> 0"
+        },
+        "trades_prob_range": {
+          "name": "trades_prob_range",
+          "value": "\"trades\".\"prob_before\" between 0 and 1 and \"trades\".\"prob_after\" between 0 and 1"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.account_type": {
+      "name": "account_type",
+      "schema": "public",
+      "values": [
+        "user",
+        "market_pool",
+        "house"
+      ]
+    },
+    "public.dispute_status": {
+      "name": "dispute_status",
+      "schema": "public",
+      "values": [
+        "open",
+        "upheld",
+        "flipped",
+        "voided"
+      ]
+    },
+    "public.ledger_reason": {
+      "name": "ledger_reason",
+      "schema": "public",
+      "values": [
+        "signup_bonus",
+        "stipend",
+        "trade",
+        "payout",
+        "void_refund",
+        "admin_adjustment"
+      ]
+    },
+    "public.market_status": {
+      "name": "market_status",
+      "schema": "public",
+      "values": [
+        "proposed",
+        "open",
+        "closed",
+        "resolved",
+        "finalized",
+        "voided",
+        "rejected"
+      ]
+    },
+    "public.outcome": {
+      "name": "outcome",
+      "schema": "public",
+      "values": [
+        "YES",
+        "NO"
+      ]
+    },
+    "public.role": {
+      "name": "role",
+      "schema": "public",
+      "values": [
+        "member",
+        "moderator",
+        "admin"
+      ]
+    },
+    "public.side": {
+      "name": "side",
+      "schema": "public",
+      "values": [
+        "YES",
+        "NO"
+      ]
+    }
+  },
+  "schemas": {},
+  "views": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

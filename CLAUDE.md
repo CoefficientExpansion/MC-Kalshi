@@ -30,7 +30,7 @@ Code is the primary implementer.
 - Secrets live in `.env.local` (gitignored); never print them.
 
 ## Commands (available after milestone M0 scaffolds the app)
-`npm run dev` · `npm test` · `npm run typecheck` · `npm run lint` · `npm run build` · `npm run db:migrate` · `npm run db:studio`
+`npm run dev` · `npm test` · `npm run typecheck` · `npm run lint` · `npm run build` · `npm run db:migrate` · `npm run db:seed` · `npm run db:studio`
 
 ## REA (reverse-engineering MCP) status
 Project-scoped only. Skill: `.claude/skills/reverse-engineer-anything`. MCP server: registered at local scope by

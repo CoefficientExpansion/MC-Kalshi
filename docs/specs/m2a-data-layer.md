@@ -1,5 +1,5 @@
 # M2a — Data layer: schema, ledger, seed
-Status: draft · Milestone: M2 (part a) · ADRs: 0001, 0003
+Status: in-progress · Milestone: M2 (part a) · ADRs: 0001, 0003
 
 ## Problem
 M2 needs auth, profiles, balances, and read-only market pages. Auth and the live database
@@ -46,16 +46,16 @@ In (`apps/web/src/db`, `apps/web/src/server`):
 Out: Supabase Auth, sign-in UI, profile creation flow, market pages (M2b); `placeTrade` (M3).
 
 ## Acceptance criteria
-- [ ] `npm run db:generate` reports no pending changes after the committed migrations.
-- [ ] Migrations apply cleanly to a fresh PGlite database (test).
-- [ ] Inserting a market with `b = 49` or an unknown status fails (test).
-- [ ] `UPDATE` and `DELETE` on `ledger_entries` and `trades` raise (test).
-- [ ] `postTransfer` rejects unbalanced or non-integer entries and writes nothing (test).
-- [ ] After a random sequence of transfers (fast-check), `ledgerSum = 0` and `mismatches = []` (test).
-- [ ] `grantSignupBonus` twice for one user credits once (test).
-- [ ] `listMarkets` / `getMarketBySlug` return `probYes = 0.5`, `displayPrice = 50` for a seeded market (test).
-- [ ] Seed runs twice against PGlite without duplicates (test).
-- [ ] `npm run typecheck && npm run lint && npm test && npm run build` green.
+- [x] `npm run db:generate` reports no pending changes after the committed migrations. (run by hand: "No schema changes, nothing to migrate"; not a test)
+- [x] Migrations apply cleanly to a fresh PGlite database (test). (`test-db.test.ts` > starts a fresh in-process Postgres; `schema.test.ts` > creates every table)
+- [x] Inserting a market with `b = 49` or an unknown status fails (test). (`schema.test.ts` > rejects a market with b = 49 / 501, rejects an unknown market status)
+- [x] `UPDATE` and `DELETE` on `ledger_entries` and `trades` raise (test). (`migrations.test.ts` > raises on UPDATE / DELETE / TRUNCATE of ledger_entries and trades)
+- [x] `postTransfer` rejects unbalanced or non-integer entries and writes nothing (test). (`ledger.test.ts` > postTransfer > rejects entries that do not sum to zero; rejects a fractional delta / NaN / Infinity / an unsafe integer)
+- [x] After a random sequence of transfers (fast-check), `ledgerSum = 0` and `mismatches = []` (test). (`ledger.test.ts` > holds after any random sequence of transfers (property))
+- [x] `grantSignupBonus` twice for one user credits once (test). (`ledger.test.ts` > credits house to user once; a second call is a no-op)
+- [x] `listMarkets` / `getMarketBySlug` return `probYes = 0.5`, `displayPrice = 50` for a seeded market (test). (`markets.test.ts` > returns a fresh market at probYes 0.5; attaches probYes and displayPrice to every row; `seed.test.ts` > serves fresh seeded markets at probYes 0.5)
+- [x] Seed runs twice against PGlite without duplicates (test). (`seed.test.ts` > is idempotent: a second run adds nothing)
+- [x] `npm run typecheck && npm run lint && npm test && npm run build` green. (run locally with `DATABASE_URL` unset; CI not yet run)
 
 ## Data touched
 All tables created. Ledger reasons used: `signup_bonus` (others defined, used from M3).
@@ -66,6 +66,41 @@ All tables created. Ledger reasons used: `signup_bonus` (others defined, used fr
   human step (SOP-07) and is the real check.
 - Real roles: the deny-all RLS assumes the app connects as the table owner (`postgres`), which
   bypasses RLS; verify against Supabase when credentials are in place.
+
+Deviations and decisions recorded while building (2026-10-29):
+- Read queries take the database as the first argument: `listMarkets(db, filter)` and
+  `getMarketBySlug(db, slug)` (the spec's signatures omitted it). Server code types it as
+  `AnyDb` (`src/db/types.ts`), so one function serves postgres-js and PGlite. With no `status`,
+  `listMarkets` returns every status including `proposed`; M2b pages must pass one.
+- `ledger_entries.account_id` is `NOT NULL` and polymorphic (no FK). The house account uses the
+  nil UUID (`HOUSE_ACCOUNT_ID`), pinned by a `CHECK`. Added a partial unique index on
+  `ledger_entries(account_id) WHERE reason = 'signup_bonus' AND account_type = 'user'` as a
+  database backstop for the one-bonus-per-user rule.
+- Dispute statuses are `open | upheld | flipped | voided` (from SOP-04 §5: uphold, flip, void).
+- Extra `CHECK`s beyond the spec: `trades.contracts <> 0`, probabilities in `[0, 1]`,
+  `positions` contracts `>= 0`. `balances.points` has no `>= 0` check on purpose: `postTransfer`
+  is generic and affordability belongs to `placeTrade` (M3).
+- The append-only triggers also block `TRUNCATE`. Tests therefore get a fresh PGlite per file
+  instead of clearing tables.
+- `postTransfer` and `grantSignupBonus` wrap their writes in `tx.transaction` (a savepoint when
+  `tx` is already a transaction), so they are atomic even if a caller passes the bare database.
+- `grantSignupBonus` returns a boolean (`true` when it credited). It locks the user's `balances`
+  row (`FOR UPDATE`) to serialize concurrent calls. PGlite runs one connection, so the race
+  itself is not exercised in tests; the partial unique index is the backstop on real Postgres.
+- `price_snapshots` has no primary key (as in architecture §7); `audit_log.id` and
+  `ledger_entries.id` are `bigint` identity columns, other ids are `uuid`.
+- Added to `apps/web` devDependencies: `@electric-sql/pglite`, `fast-check`, `tsx` (runs
+  `db:seed`; Node 24 type stripping cannot follow the extensionless imports). Added
+  `@mc-kalshi/engine` as a dependency and `transpilePackages: ["@mc-kalshi/engine"]` in
+  `next.config.ts`. The seed CLI is `src/db/seed-cli.ts`; `src/db/seed.ts` exports
+  `seedDatabase(db, now)` for tests. Root `db:seed` delegates to `apps/web`.
+- Seed data: 6 markets across 4 categories (two campus life, one academics, two weather, one
+  clubs and events), with `created_by` null. Close dates are `now + N days`; rules mention
+  November dates for the registrar and Thanksgiving topics, so review them when seeding a later term.
+- Verified beyond the test suite: migrations, `db:seed` (twice) and the append-only triggers
+  against a throwaway local PostgreSQL 16 with TLS. Not verified: Supabase (dev project), the
+  Supabase pooler on port 6543, `ssl: "require"` against Supabase's certificate, and the
+  roles/RLS behavior for `anon` and `authenticated` (human step in SOP-07).
 
 ## Tasks
 1. Add `@electric-sql/pglite` (dev) and the test harness — verify by: an empty-migrations smoke test.
