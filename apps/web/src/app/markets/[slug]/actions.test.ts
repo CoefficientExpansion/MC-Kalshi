@@ -3,27 +3,36 @@ import { placeTradeAction } from "./actions";
 
 const mocks = vi.hoisted(() => ({
   db: undefined as unknown,
-  user: null as { id: string } | null,
+  session: null as { userId: string; suspended: boolean } | null,
   placeTrade: vi.fn(),
 }));
 vi.mock("@/db", () => ({ getDb: () => mocks.db }));
-vi.mock("@/server/auth", () => ({ getCurrentUser: async () => mocks.user }));
+vi.mock("@/server/auth", () => ({ getSessionMember: async () => mocks.session }));
 vi.mock("@/server/trading", () => ({ placeTrade: mocks.placeTrade }));
 
 const USER = { id: "00000000-0000-4000-8000-000000000001" };
+const SESSION = { userId: USER.id, suspended: false };
 const INPUT = { marketId: "3f2b8c1e-9d4a-4b6e-8f10-2a3b4c5d6e7f", amount: 500 };
 
 beforeEach(() => {
   mocks.db = { fake: true };
-  mocks.user = USER;
+  mocks.session = SESSION;
   mocks.placeTrade.mockReset();
 });
 
 describe("placeTradeAction", () => {
   it("returns unauthenticated for a signed-out session without touching the database", async () => {
-    mocks.user = null;
+    mocks.session = null;
     expect(await placeTradeAction(INPUT)).toMatchObject({ ok: false, code: "unauthenticated" });
     expect(mocks.placeTrade).not.toHaveBeenCalled();
+  });
+
+  it("lets placeTrade answer account_suspended for a suspended member (not unauthenticated)", async () => {
+    mocks.session = { ...SESSION, suspended: true };
+    const outcome = { ok: false, code: "account_suspended", message: "suspended" };
+    mocks.placeTrade.mockResolvedValue(outcome);
+    expect(await placeTradeAction(INPUT)).toBe(outcome);
+    expect(mocks.placeTrade).toHaveBeenCalledWith(mocks.db, USER.id, INPUT);
   });
 
   it("returns a generic internal_error when the database is not configured", async () => {

@@ -7,7 +7,7 @@ import {
   type TradeFailure,
   type TradeView,
 } from "@/server/trade-types";
-import { TICKET_BANNED } from "./copy-guard";
+import { sourceCopy, TICKET_BANNED } from "./copy-guard";
 import { buildTicketQuote, type TicketQuoteFailure } from "./ticket-quote";
 import {
   formatContracts,
@@ -25,15 +25,9 @@ import {
   tradeErrorMessage,
 } from "./trade-copy";
 
-/**
- * Source text with the two code uses of "$" removed: template placeholders (`${x}`) and regex
- * end anchors (`$/`). Every other "$", and every banned word, counts.
- */
+/** The user-visible text of a source file (string literals and JSX text; see `sourceCopy`). */
 function scannable(path: string): string {
-  return readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8").replace(
-    /\$\{|\$\//g,
-    "",
-  );
+  return sourceCopy(readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8")).join("\n");
 }
 
 function failure<C extends TradeErrorCode>(code: C, extra: object = {}): TradeFailure {
@@ -263,7 +257,8 @@ describe("copy guard", () => {
     for (const bad of ["Place a bet", "wager", "Win a prize", "cash out", "cashout", "$5", "5¢"]) {
       expect(bad).toMatch(TICKET_BANNED);
     }
-    expect(scannable("./ticket-quote.test.ts")).toBeTypeOf("string");
+    // The scan reads real copy out of a file: the ticket's title is in it.
+    expect(scannable("./trade-copy.ts")).toContain("Trade");
   });
 
   it.each([

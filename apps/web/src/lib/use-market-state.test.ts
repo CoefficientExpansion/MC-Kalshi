@@ -14,6 +14,7 @@ const STATE: MarketStateDto = {
   qYes: 9.761859,
   qNo: 0,
   probabilityYes: 0.524,
+  displayPrice: 52,
 };
 
 const json = (body: unknown, status = 200) =>
@@ -43,6 +44,11 @@ describe("parseMarketState", () => {
     ["a bad position", { ...STATE, position: { contractsYes: 1 } }],
     ["a bad balance", { ...STATE, balance: "9500" }],
     ["no status", { ...STATE, status: 3 }],
+    ["a missing displayPrice", { ...STATE, displayPrice: undefined }],
+    ["a string displayPrice", { ...STATE, displayPrice: "52" }],
+    ["a fractional displayPrice", { ...STATE, displayPrice: 52.4 }],
+    ["a displayPrice of 0", { ...STATE, displayPrice: 0 }],
+    ["a displayPrice of 100", { ...STATE, displayPrice: 100 }],
   ])("rejects %s", (_, body) => {
     expect(parseMarketState(body)).toBeNull();
   });
