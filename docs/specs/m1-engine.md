@@ -38,15 +38,15 @@ In (`packages/engine`, pure TypeScript, zero runtime deps):
 Out: any I/O, DB types, rate limits, balance checks (server's job), multi-outcome markets.
 
 ## Acceptance criteria
-- [ ] Worked example (§5): b=100, q=(0,0), 500 points on YES → ≈ 9.75 contracts, avgPrice ≈ 51, probAfter ≈ 0.524, payoutIfWin 975 or 976 (floor of contracts×100), costPoints ≤ 500 and ≥ 499.
-- [ ] Property 1: `probYes + probNo = 1` (within 1e-12) and `0 < p < 1` for all finite q with |q| ≤ 50·b.
-- [ ] Property 2: raw cost(0) = 0; raw cost strictly increasing and convex in Δ.
-- [ ] Property 3: buy Δ then sell Δ (rounded) never returns more points than were paid.
-- [ ] Property 4: under random sequences of buys/sells by simulated users (who only sell what they hold), pool liability `max(qYes, qNo)·100 − (sum of user costPoints)` never exceeds `100·b·ln 2`.
-- [ ] Property 5: `quoteBuyWithPoints(c).costPoints ≤ c` and `≥ c − 1` whenever c ≥ 1 point and the market is not at an extreme (p ∈ [0.01, 0.99]).
-- [ ] Property 6: for random trade sequences, `voidRefunds` restores every user's balance exactly to its pre-market value (integer arithmetic, no drift).
-- [ ] Extra: no overflow/NaN for q up to ±1e6 with b = 50; quote for a buy and the matching `nextState` agree (`probAfter == probYes(nextState)`).
-- [ ] ≥ 95 % line coverage in `packages/engine` (`@vitest/coverage-v8`), enforced by a threshold in the engine's vitest config.
+- [x] Worked example (§5): b=100, q=(0,0), 500 points on YES → ≈ 9.75 contracts, avgPrice ≈ 51, probAfter ≈ 0.524, payoutIfWin 975 or 976 (floor of contracts×100), costPoints ≤ 500 and ≥ 499. (quote.test.ts: "worked example (architecture §5)" › "b = 100, q = (0, 0), 500 points on YES gives about 9.76 contracts"; actual: 9.761859 contracts, costPoints 500, payoutIfWin 976)
+- [x] Property 1: `probYes + probNo = 1` (within 1e-12) and `0 < p < 1` for all finite q with |q| ≤ 50·b. (lmsr.test.ts: "property 1: p_yes + p_no = 1 (1e-12) and 0 < p < 1 for all finite |q| ≤ 50·b", plus the q = ±1e6 extremes test)
+- [x] Property 2: raw cost(0) = 0; raw cost strictly increasing and convex in Δ. (lmsr.test.ts: "property 2: raw cost(0) = 0, strictly increasing and convex in Δ")
+- [x] Property 3: buy Δ then sell Δ (rounded) never returns more points than were paid. (quote.test.ts: "property 3: buy Δ then sell Δ never returns more points than were paid" and its by-points variant)
+- [x] Property 4: under random sequences of buys/sells by simulated users (who only sell what they hold), pool liability `max(qYes, qNo)·100 − (sum of user costPoints)` never exceeds `100·b·ln 2`. (positions.test.ts: "property 4: pool liability max(qYes, qNo)·100 − Σ costPoints never exceeds 100·b·ln 2" and the settlement variant)
+- [x] Property 5: `quoteBuyWithPoints(c).costPoints ≤ c` and `≥ c − 1` whenever c ≥ 1 point and the market is not at an extreme (p ∈ [0.01, 0.99]). (quote.test.ts: "property 5: costPoints ≤ c and ≥ c − 1 for c ≥ 1 and p ∈ [0.01, 0.99]")
+- [x] Property 6: for random trade sequences, `voidRefunds` restores every user's balance exactly to its pre-market value (integer arithmetic, no drift). (positions.test.ts: "property 6: voidRefunds restores every user's balance exactly (integer arithmetic)")
+- [x] Extra: no overflow/NaN for q up to ±1e6 with b = 50; quote for a buy and the matching `nextState` agree (`probAfter == probYes(nextState)`). (quote.test.ts: "no overflow or NaN for q up to ±1e6 with b = 50" and "property: probAfter == probYes(nextState), ..."; lmsr.test.ts: cost/probability extremes)
+- [x] ≥ 95 % line coverage in `packages/engine` (`@vitest/coverage-v8`), enforced by a threshold in the engine's vitest config. (`npx vitest run --coverage` in packages/engine: 100 % lines; threshold in vitest.config.ts verified to fail the run below 95 %)
 
 ## Data touched
 None (pure package). Shapes chosen to map 1:1 onto `trades`, `positions`, `markets.q_*` in M2/M3.
