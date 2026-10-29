@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { balances, ledgerEntries, profiles } from "@/db/schema";
-import { createTestDb, type TestDb } from "@/db/test-db";
+import { openTestDb } from "@/db/test-db";
+import type { AnyDb } from "@/db/types";
 import { checkLedgerInvariants, LedgerError } from "./ledger";
 import {
   DEFAULT_SIGNUP_BONUS_POINTS,
@@ -55,11 +56,11 @@ describe("defaultDisplayName", () => {
 });
 
 describe("ensureProfile", () => {
-  let db: TestDb;
+  let db: AnyDb;
   let close: () => Promise<void>;
 
   beforeAll(async () => {
-    ({ db, close } = await createTestDb());
+    ({ db, close } = await openTestDb());
   });
   afterAll(async () => {
     await close();
@@ -172,11 +173,11 @@ describe("ensureProfile", () => {
 });
 
 describe("loadMember", () => {
-  let db: TestDb;
+  let db: AnyDb;
   let close: () => Promise<void>;
 
   beforeAll(async () => {
-    ({ db, close } = await createTestDb());
+    ({ db, close } = await openTestDb());
   });
   afterAll(async () => {
     await close();

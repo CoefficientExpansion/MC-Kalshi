@@ -7,10 +7,12 @@ try {
   // no .env.local: rely on the process environment
 }
 
-const url = process.env.DATABASE_URL;
+// Migrations run as the table owner. Once the app connects as the restricted `mc_app` role
+// (docs/adr/0006-app-database-role.md), MIGRATION_DATABASE_URL holds the owner's URL.
+const url = process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL;
 if (!url) {
   console.warn(
-    "DATABASE_URL is not set: `db:generate` works, `db:migrate` and `db:studio` will not.",
+    "Neither MIGRATION_DATABASE_URL nor DATABASE_URL is set: `db:generate` works, `db:migrate` and `db:studio` will not.",
   );
 }
 

@@ -1,8 +1,9 @@
 import { eq, sql } from "drizzle-orm";
 import fc from "fast-check";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { balances, HOUSE_ACCOUNT_ID, ledgerEntries, profiles } from "@/db/schema";
-import { createTestDb, type TestDb } from "@/db/test-db";
+import { openTestDb, pgError, type TestDbHandle } from "@/db/test-db";
+import type { AnyDb } from "@/db/types";
 import {
   checkLedgerInvariants,
   grantSignupBonus,
@@ -10,6 +11,9 @@ import {
   postTransfer,
   type TransferEntry,
 } from "./ledger";
+
+// Every test opens its own database (PGlite locally, a throwaway real database in the CI
+// `postgres` job) and sets up exactly what it needs, so tests do not depend on each other's order.
 
 const POOL_ID = "99999999-9999-4999-8999-999999999999";
 const user = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
@@ -23,272 +27,341 @@ const userEntry = (n: number, deltaPoints: number) => ({
   accountId: user(n),
   deltaPoints,
 });
+const pool = (deltaPoints: number) => ({
+  accountType: "market_pool" as const,
+  accountId: POOL_ID,
+  deltaPoints,
+});
 
-describe("ledger", () => {
-  let db: TestDb;
-  let close: () => Promise<void>;
+const handles: TestDbHandle[] = [];
+afterEach(async () => {
+  await Promise.all(handles.splice(0).map((h) => h.close()));
+});
 
-  async function addUser(n: number) {
-    await db
+/** A fresh database with profiles for users 1..6. */
+async function fresh(): Promise<AnyDb> {
+  const h = await openTestDb();
+  handles.push(h);
+  for (const n of [1, 2, 3, 4, 5, 6]) {
+    await h.db
       .insert(profiles)
       .values({ id: user(n), email: `u${n}@my.maryvillecollege.edu`, displayName: `User ${n}` });
   }
-  const balanceOf = async (n: number) =>
-    (
-      await db
-        .select()
-        .from(balances)
-        .where(eq(balances.userId, user(n)))
-    ).at(0)?.points;
-  const ledgerCount = async () =>
-    (await db.select({ n: sql<number>`count(*)::int` }).from(ledgerEntries))[0]?.n;
+  return h.db;
+}
 
-  beforeAll(async () => {
-    ({ db, close } = await createTestDb());
-    for (const n of [1, 2, 3, 4, 5, 6]) {
-      await addUser(n);
-    }
-  });
-  afterAll(async () => {
-    await close();
+const balanceOf = async (db: AnyDb, n: number) =>
+  (
+    await db
+      .select()
+      .from(balances)
+      .where(eq(balances.userId, user(n)))
+  ).at(0)?.points;
+const ledgerCount = async (db: AnyDb) =>
+  (await db.select({ n: sql<number>`count(*)::int` }).from(ledgerEntries))[0]?.n;
+
+describe("postTransfer", () => {
+  it("inserts balanced entries and updates the balance of every user touched", async () => {
+    const db = await fresh();
+    const rows = await postTransfer(db, {
+      entries: [house(-300), userEntry(1, 100), userEntry(2, 200)],
+      reason: "stipend",
+      refType: "stipend_run",
+      refId: POOL_ID,
+    });
+    expect(rows).toHaveLength(3);
+    expect(rows[1]).toMatchObject({
+      accountType: "user",
+      accountId: user(1),
+      deltaPoints: 100,
+      reason: "stipend",
+      refType: "stipend_run",
+      refId: POOL_ID,
+    });
+    expect(await ledgerCount(db)).toBe(3);
+    expect(await balanceOf(db, 1)).toBe(100);
+    expect(await balanceOf(db, 2)).toBe(200);
   });
 
-  describe("postTransfer", () => {
-    it("inserts balanced entries and updates the balance of every user touched", async () => {
-      const before = (await ledgerCount()) ?? 0;
-      const rows = await postTransfer(db, {
-        entries: [house(-300), userEntry(1, 100), userEntry(2, 200)],
+  it("adds to an existing balance and nets several entries for one user", async () => {
+    const db = await fresh();
+    await postTransfer(db, { entries: [house(-100), userEntry(1, 100)], reason: "stipend" });
+    await postTransfer(db, {
+      entries: [userEntry(1, -40), userEntry(1, -10), pool(50)],
+      reason: "trade",
+    });
+    expect(await balanceOf(db, 1)).toBe(50);
+  });
+
+  it("may spend a balance down to exactly zero", async () => {
+    const db = await fresh();
+    await postTransfer(db, { entries: [house(-30), userEntry(1, 30)], reason: "stipend" });
+    await postTransfer(db, { entries: [userEntry(1, -30), pool(30)], reason: "trade" });
+    expect(await balanceOf(db, 1)).toBe(0);
+  });
+
+  it("rejects a transfer that would overdraw a user, via the balances CHECK, and writes nothing", async () => {
+    const db = await fresh();
+    await postTransfer(db, { entries: [house(-30), userEntry(1, 30)], reason: "stipend" });
+    const error = await pgError(
+      postTransfer(db, { entries: [userEntry(1, -31), pool(31)], reason: "trade" }),
+    );
+    expect(error.code).toBe("23514"); // check_violation, not a LedgerError
+    expect(error.message).toContain("balances_points_nonnegative");
+    expect(await balanceOf(db, 1)).toBe(30);
+    expect(await ledgerCount(db)).toBe(2);
+  });
+
+  it("rejects a debit of a user who has no balance row yet, and writes nothing", async () => {
+    const db = await fresh();
+    const error = await pgError(
+      postTransfer(db, { entries: [userEntry(3, -1), pool(1)], reason: "trade" }),
+    );
+    expect(error.code).toBe("23514");
+    expect(await ledgerCount(db)).toBe(0);
+    expect(await balanceOf(db, 3)).toBeUndefined();
+  });
+
+  it("rejects entries that do not sum to zero and writes nothing", async () => {
+    const db = await fresh();
+    await expect(
+      postTransfer(db, { entries: [house(-100), userEntry(3, 99)], reason: "stipend" }),
+    ).rejects.toThrow(LedgerError);
+    expect(await ledgerCount(db)).toBe(0);
+    expect(await balanceOf(db, 3)).toBeUndefined();
+  });
+
+  it.each([
+    ["a fractional delta", 1.5],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["an unsafe integer", 2 ** 53],
+  ])("rejects %s and writes nothing", async (_name, bad) => {
+    const db = await fresh();
+    await expect(
+      postTransfer(db, { entries: [house(-bad), userEntry(3, bad)], reason: "stipend" }),
+    ).rejects.toThrow(LedgerError);
+    expect(await ledgerCount(db)).toBe(0);
+    expect(await balanceOf(db, 3)).toBeUndefined();
+  });
+
+  it("rejects a transfer with fewer than two entries", async () => {
+    const db = await fresh();
+    await expect(postTransfer(db, { entries: [], reason: "stipend" })).rejects.toThrow(LedgerError);
+    await expect(
+      postTransfer(db, { entries: [userEntry(3, 0)], reason: "stipend" }),
+    ).rejects.toThrow(LedgerError);
+  });
+
+  it("rejects a user's net change that is not a safe integer", async () => {
+    const db = await fresh();
+    const max = Number.MAX_SAFE_INTEGER;
+    await expect(
+      postTransfer(db, {
+        entries: [userEntry(3, max), userEntry(3, max), house(-max), house(-max)],
         reason: "stipend",
-        refType: "stipend_run",
-        refId: POOL_ID,
-      });
-      expect(rows).toHaveLength(3);
-      expect(rows[1]).toMatchObject({
-        accountType: "user",
-        accountId: user(1),
-        deltaPoints: 100,
+      }),
+    ).rejects.toThrow(LedgerError);
+    expect(await ledgerCount(db)).toBe(0);
+  });
+
+  it("rejects a house entry that is not on the house account", async () => {
+    const db = await fresh();
+    await expect(
+      postTransfer(db, {
+        entries: [{ accountType: "house", accountId: user(1), deltaPoints: -1 }, userEntry(3, 1)],
         reason: "stipend",
-        refType: "stipend_run",
-        refId: POOL_ID,
-      });
-      expect(await ledgerCount()).toBe(before + 3);
-      expect(await balanceOf(1)).toBe(100);
-      expect(await balanceOf(2)).toBe(200);
-    });
+      }),
+    ).rejects.toThrow(LedgerError);
+  });
 
-    it("adds to an existing balance and nets several entries for one user", async () => {
-      await postTransfer(db, {
-        entries: [
-          userEntry(1, -40),
-          userEntry(1, -10),
-          { accountType: "market_pool", accountId: POOL_ID, deltaPoints: 50 },
-        ],
-        reason: "trade",
-      });
-      expect(await balanceOf(1)).toBe(50);
-    });
+  it("writes nothing when a later step fails (unknown user), even outside a transaction", async () => {
+    const db = await fresh();
+    await expect(
+      postTransfer(db, { entries: [house(-5), userEntry(404, 5)], reason: "stipend" }),
+    ).rejects.toThrow();
+    expect(await ledgerCount(db)).toBe(0);
+  });
 
-    it("rejects entries that do not sum to zero and writes nothing", async () => {
-      const before = await ledgerCount();
-      await expect(
-        postTransfer(db, { entries: [house(-100), userEntry(3, 99)], reason: "stipend" }),
-      ).rejects.toThrow(LedgerError);
-      expect(await ledgerCount()).toBe(before);
-      expect(await balanceOf(3)).toBeUndefined();
-    });
+  it("rolls back with the caller's transaction", async () => {
+    const db = await fresh();
+    await expect(
+      db.transaction(async (tx) => {
+        await postTransfer(tx, { entries: [house(-7), userEntry(4, 7)], reason: "stipend" });
+        throw new Error("abort");
+      }),
+    ).rejects.toThrow("abort");
+    expect(await ledgerCount(db)).toBe(0);
+    expect(await balanceOf(db, 4)).toBeUndefined();
+  });
+});
 
-    it.each([
-      ["a fractional delta", 1.5],
-      ["NaN", Number.NaN],
-      ["Infinity", Number.POSITIVE_INFINITY],
-      ["an unsafe integer", 2 ** 53],
-    ])("rejects %s and writes nothing", async (_name, bad) => {
-      const before = await ledgerCount();
-      await expect(
-        postTransfer(db, { entries: [house(-bad), userEntry(3, bad)], reason: "stipend" }),
-      ).rejects.toThrow(LedgerError);
-      expect(await ledgerCount()).toBe(before);
-      expect(await balanceOf(3)).toBeUndefined();
-    });
+describe("grantSignupBonus", () => {
+  it("credits house to user once; a second call is a no-op", async () => {
+    const db = await fresh();
+    expect(await grantSignupBonus(db, user(5), 10_000)).toBe(true);
+    expect(await grantSignupBonus(db, user(5), 10_000)).toBe(false);
+    expect(await balanceOf(db, 5)).toBe(10_000);
+    const rows = await db
+      .select()
+      .from(ledgerEntries)
+      .where(eq(ledgerEntries.reason, "signup_bonus"))
+      .orderBy(ledgerEntries.id);
+    expect(rows.map((r) => [r.accountType, r.deltaPoints])).toEqual([
+      ["house", -10_000],
+      ["user", 10_000],
+    ]);
+    expect(rows[0]).toMatchObject({ refType: "profile", refId: user(5) });
+  });
 
-    it("rejects a transfer with fewer than two entries", async () => {
-      await expect(postTransfer(db, { entries: [], reason: "stipend" })).rejects.toThrow(
-        LedgerError,
-      );
-      await expect(
-        postTransfer(db, { entries: [userEntry(3, 0)], reason: "stipend" }),
-      ).rejects.toThrow(LedgerError);
-    });
+  it("does not grant a different amount on a repeat call", async () => {
+    const db = await fresh();
+    await grantSignupBonus(db, user(6), 500);
+    await grantSignupBonus(db, user(6), 9_999);
+    expect(await balanceOf(db, 6)).toBe(500);
+  });
 
-    it("rejects a user's net change that is not a safe integer", async () => {
-      const max = Number.MAX_SAFE_INTEGER;
-      const before = await ledgerCount();
-      await expect(
-        postTransfer(db, {
-          entries: [userEntry(3, max), userEntry(3, max), house(-max), house(-max)],
-          reason: "stipend",
-        }),
-      ).rejects.toThrow(LedgerError);
-      expect(await ledgerCount()).toBe(before);
-    });
+  it.each([0, -5, 1.5, Number.NaN])("rejects %s points", async (points) => {
+    const db = await fresh();
+    await expect(grantSignupBonus(db, user(6), points)).rejects.toThrow(LedgerError);
+  });
 
-    it("rejects a house entry that is not on the house account", async () => {
-      await expect(
-        postTransfer(db, {
-          entries: [{ accountType: "house", accountId: user(1), deltaPoints: -1 }, userEntry(3, 1)],
-          reason: "stipend",
-        }),
-      ).rejects.toThrow(LedgerError);
-    });
+  it("the partial unique index rejects a second user signup_bonus row inserted directly", async () => {
+    const db = await fresh();
+    await grantSignupBonus(db, user(1), 100);
+    const error = await pgError(
+      db.insert(ledgerEntries).values([
+        {
+          accountType: "house",
+          accountId: HOUSE_ACCOUNT_ID,
+          deltaPoints: -100,
+          reason: "signup_bonus",
+        },
+        { accountType: "user", accountId: user(1), deltaPoints: 100, reason: "signup_bonus" },
+      ]),
+    );
+    expect(error.code).toBe("23505"); // unique_violation
+    expect(error.message).toContain("ledger_entries_signup_bonus_uq");
+    expect(await ledgerCount(db)).toBe(2);
+  });
 
-    it("writes nothing when a later step fails (unknown user), even outside a transaction", async () => {
-      const before = await ledgerCount();
-      await expect(
-        postTransfer(db, { entries: [house(-5), userEntry(404, 5)], reason: "stipend" }),
-      ).rejects.toThrow();
-      expect(await ledgerCount()).toBe(before);
-    });
+  it("the index covers only user rows: the house takes many signup_bonus debits", async () => {
+    const db = await fresh();
+    await grantSignupBonus(db, user(1), 100);
+    await grantSignupBonus(db, user(2), 100);
+    const houseRows = await db
+      .select()
+      .from(ledgerEntries)
+      .where(eq(ledgerEntries.accountType, "house"));
+    expect(houseRows).toHaveLength(2);
+  });
+});
 
-    it("rolls back with the caller's transaction", async () => {
-      const before = await ledgerCount();
-      await expect(
-        db.transaction(async (tx) => {
-          await postTransfer(tx, { entries: [house(-7), userEntry(4, 7)], reason: "stipend" });
-          throw new Error("abort");
-        }),
-      ).rejects.toThrow("abort");
-      expect(await ledgerCount()).toBe(before);
-      expect(await balanceOf(4)).toBeUndefined();
+describe("checkLedgerInvariants", () => {
+  it("reports a zero sum and no mismatches for a consistent ledger", async () => {
+    const db = await fresh();
+    await postTransfer(db, {
+      entries: [house(-300), userEntry(1, 100), userEntry(2, 200)],
+      reason: "stipend",
+    });
+    await grantSignupBonus(db, user(3), 50);
+    expect(await checkLedgerInvariants(db)).toEqual({ ledgerSum: 0, mismatches: [] });
+  });
+
+  it("reports a user whose cached balance drifted from the ledger", async () => {
+    const db = await fresh();
+    await postTransfer(db, {
+      entries: [house(-300), userEntry(1, 100), userEntry(2, 200)],
+      reason: "stipend",
+    });
+    await db
+      .update(balances)
+      .set({ points: 123 })
+      .where(eq(balances.userId, user(2)));
+    const result = await checkLedgerInvariants(db);
+    expect(result.ledgerSum).toBe(0);
+    expect(result.mismatches).toEqual([{ userId: user(2), cached: 123, ledger: 200 }]);
+    await db
+      .update(balances)
+      .set({ points: 200 })
+      .where(eq(balances.userId, user(2)));
+    expect((await checkLedgerInvariants(db)).mismatches).toEqual([]);
+  });
+
+  it("reports a non-zero sum and a user with ledger entries but no balance row", async () => {
+    const db = await fresh();
+    await db.insert(ledgerEntries).values({
+      accountType: "user",
+      accountId: user(1),
+      deltaPoints: 9,
+      reason: "admin_adjustment",
+    });
+    expect(await checkLedgerInvariants(db)).toEqual({
+      ledgerSum: 9,
+      mismatches: [{ userId: user(1), cached: 0, ledger: 9 }],
     });
   });
 
-  describe("grantSignupBonus", () => {
-    it("credits house to user once; a second call is a no-op", async () => {
-      expect(await grantSignupBonus(db, user(5), 10_000)).toBe(true);
-      expect(await grantSignupBonus(db, user(5), 10_000)).toBe(false);
-      expect(await balanceOf(5)).toBe(10_000);
-      const rows = await db
-        .select()
-        .from(ledgerEntries)
-        .where(eq(ledgerEntries.reason, "signup_bonus"))
-        .orderBy(ledgerEntries.id);
-      const mine = rows.filter((r) => r.accountId === user(5) || r.refId === user(5));
-      expect(mine.map((r) => [r.accountType, r.deltaPoints])).toEqual([
-        ["house", -10_000],
-        ["user", 10_000],
-      ]);
-      expect(mine[0]).toMatchObject({ refType: "profile", refId: user(5) });
+  it("holds after any random sequence of transfers; an overdraft is refused whole (property)", async () => {
+    const db = await fresh();
+    const ids = [user(1), user(2), user(3)];
+    const accounts: Pick<TransferEntry, "accountType" | "accountId">[] = [
+      ...ids.map((accountId) => ({ accountType: "user" as const, accountId })),
+      { accountType: "market_pool", accountId: POOL_ID },
+      { accountType: "house", accountId: HOUSE_ACCOUNT_ID },
+    ];
+    const account = (index: number) => accounts[index] as (typeof accounts)[number];
+    const expected = new Map(ids.map((id) => [id, 0]));
+    const leg = fc.record({
+      account: fc.integer({ min: 0, max: accounts.length - 1 }),
+      delta: fc.integer({ min: -1_000_000, max: 1_000_000 }),
     });
-
-    it("does not grant a different amount on a repeat call", async () => {
-      await grantSignupBonus(db, user(6), 500);
-      await grantSignupBonus(db, user(6), 9_999);
-      expect(await balanceOf(6)).toBe(500);
+    const transfer = fc.record({
+      legs: fc.array(leg, { minLength: 1, maxLength: 5 }),
+      balancer: fc.integer({ min: 0, max: accounts.length - 1 }),
+      reason: fc.constantFrom("trade", "payout", "void_refund", "admin_adjustment"),
     });
-
-    it.each([0, -5, 1.5, Number.NaN])("rejects %s points", async (points) => {
-      await expect(grantSignupBonus(db, user(6), points)).rejects.toThrow(LedgerError);
-    });
-  });
-
-  describe("checkLedgerInvariants", () => {
-    it("reports a zero sum and no mismatches for a consistent ledger", async () => {
-      expect(await checkLedgerInvariants(db)).toEqual({ ledgerSum: 0, mismatches: [] });
-    });
-
-    it("reports a user whose cached balance drifted from the ledger", async () => {
-      await db
-        .update(balances)
-        .set({ points: 123 })
-        .where(eq(balances.userId, user(2)));
-      const result = await checkLedgerInvariants(db);
-      expect(result.ledgerSum).toBe(0);
-      expect(result.mismatches).toEqual([{ userId: user(2), cached: 123, ledger: 200 }]);
-      await db
-        .update(balances)
-        .set({ points: 200 })
-        .where(eq(balances.userId, user(2)));
-      expect((await checkLedgerInvariants(db)).mismatches).toEqual([]);
-    });
-
-    it("reports a non-zero sum and a user with ledger entries but no balance row", async () => {
-      const handle = await createTestDb();
-      try {
-        await handle.db
-          .insert(profiles)
-          .values({ id: user(1), email: "x@my.maryvillecollege.edu", displayName: "X" });
-        await handle.db.insert(ledgerEntries).values({
-          accountType: "user",
-          accountId: user(1),
-          deltaPoints: 9,
-          reason: "admin_adjustment",
-        });
-        expect(await checkLedgerInvariants(handle.db)).toEqual({
-          ledgerSum: 9,
-          mismatches: [{ userId: user(1), cached: 0, ledger: 9 }],
-        });
-      } finally {
-        await handle.close();
-      }
-    });
-
-    it("holds after any random sequence of transfers (property)", async () => {
-      const handle = await createTestDb();
-      const ids = [user(1), user(2), user(3)];
-      for (const [i, id] of ids.entries()) {
-        await handle.db
-          .insert(profiles)
-          .values({ id, email: `p${i}@my.maryvillecollege.edu`, displayName: `P${i}` });
-      }
-      const accounts: Pick<TransferEntry, "accountType" | "accountId">[] = [
-        ...ids.map((accountId) => ({ accountType: "user" as const, accountId })),
-        { accountType: "market_pool", accountId: POOL_ID },
-        { accountType: "house", accountId: HOUSE_ACCOUNT_ID },
-      ];
-      const account = (index: number) => accounts[index] as (typeof accounts)[number];
-      const expected = new Map(ids.map((id) => [id, 0]));
-      const leg = fc.record({
-        account: fc.integer({ min: 0, max: accounts.length - 1 }),
-        delta: fc.integer({ min: -1_000_000, max: 1_000_000 }),
-      });
-      const transfer = fc.record({
-        legs: fc.array(leg, { minLength: 1, maxLength: 5 }),
-        balancer: fc.integer({ min: 0, max: accounts.length - 1 }),
-        reason: fc.constantFrom("trade", "payout", "void_refund", "admin_adjustment"),
-      });
-      try {
-        await fc.assert(
-          fc.asyncProperty(
-            fc.array(transfer, { minLength: 1, maxLength: 6 }),
-            async (transfers) => {
-              for (const t of transfers) {
-                const entries: TransferEntry[] = t.legs.map((l) => ({
-                  ...account(l.account),
-                  deltaPoints: l.delta,
-                }));
-                const total = entries.reduce((sum, e) => sum + e.deltaPoints, 0);
-                entries.push({ ...account(t.balancer), deltaPoints: -total });
-                await postTransfer(handle.db, { entries, reason: t.reason });
-                for (const e of entries) {
-                  if (e.accountType === "user") {
-                    expected.set(e.accountId, (expected.get(e.accountId) ?? 0) + e.deltaPoints);
-                  }
-                }
-              }
-              const result = await checkLedgerInvariants(handle.db);
-              expect(result.ledgerSum).toBe(0);
-              expect(result.mismatches).toEqual([]);
-            },
-          ),
-          { numRuns: 25 },
-        );
-        const cached = await handle.db.select().from(balances);
-        for (const row of cached) {
-          expect(row.points).toBe(expected.get(row.userId));
+    let refused = 0;
+    await fc.assert(
+      fc.asyncProperty(fc.array(transfer, { minLength: 1, maxLength: 6 }), async (transfers) => {
+        for (const t of transfers) {
+          const entries: TransferEntry[] = t.legs.map((l) => ({
+            ...account(l.account),
+            deltaPoints: l.delta,
+          }));
+          const total = entries.reduce((sum, e) => sum + e.deltaPoints, 0);
+          entries.push({ ...account(t.balancer), deltaPoints: -total });
+          const next = new Map(expected);
+          for (const e of entries) {
+            if (e.accountType === "user") {
+              next.set(e.accountId, (next.get(e.accountId) ?? 0) + e.deltaPoints);
+            }
+          }
+          const overdraws = [...next.values()].some((points) => points < 0);
+          const before = await ledgerCount(db);
+          if (overdraws) {
+            refused += 1;
+            expect((await pgError(postTransfer(db, { entries, reason: t.reason }))).code).toBe(
+              "23514",
+            );
+            expect(await ledgerCount(db)).toBe(before);
+          } else {
+            await postTransfer(db, { entries, reason: t.reason });
+            for (const [id, points] of next) {
+              expected.set(id, points);
+            }
+          }
         }
-      } finally {
-        await handle.close();
-      }
-    });
+        const result = await checkLedgerInvariants(db);
+        expect(result.ledgerSum).toBe(0);
+        expect(result.mismatches).toEqual([]);
+      }),
+      { numRuns: 25 },
+    );
+    expect(refused).toBeGreaterThan(0);
+    for (const row of await db.select().from(balances)) {
+      expect(row.points).toBe(expected.get(row.userId));
+      expect(row.points).toBeGreaterThanOrEqual(0);
+    }
   });
 });
