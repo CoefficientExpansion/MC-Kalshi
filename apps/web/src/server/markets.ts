@@ -1,3 +1,4 @@
+import "server-only";
 import { displayPrice, probabilityYes } from "@mc-kalshi/engine";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { type Category, categories, type Market, markets } from "@/db/schema";

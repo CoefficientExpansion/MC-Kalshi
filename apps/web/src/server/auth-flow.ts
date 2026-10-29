@@ -1,3 +1,4 @@
+import "server-only";
 import type { AnyDb } from "@/db/types";
 import { isAllowedEmail, normalizeEmail } from "./auth-email";
 import { ensureProfile, loadMember, type Member, ProfileError } from "./profiles";
