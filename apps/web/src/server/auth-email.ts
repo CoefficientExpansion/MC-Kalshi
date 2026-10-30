@@ -10,7 +10,17 @@ export const DEFAULT_ALLOWED_DOMAINS: readonly string[] = [
   "my.maryvillecollege.edu",
 ];
 
+/**
+ * The allow-any domain policy (open mode, ADR-0007): any plain host name, with every other syntax
+ * rule still applied. Never the default; only `getEmailDomainPolicy` returns it.
+ */
+export const ANY_DOMAIN = "any";
+
+/** Which domains may sign in: an exact allowlist, or {@link ANY_DOMAIN}. */
+export type DomainPolicy = readonly string[] | typeof ANY_DOMAIN;
+
 const MAX_EMAIL_LENGTH = 254;
+const MAX_LABEL_LENGTH = 63;
 const MAX_LOCAL_LENGTH = 64;
 
 // A deliberately narrow local part: ASCII letters, digits and `._+-'`, with no leading, trailing
@@ -19,7 +29,8 @@ const MAX_LOCAL_LENGTH = 64;
 const LOCAL_PART = /^[a-z0-9_+'-]+(?:\.[a-z0-9_+'-]+)*$/;
 
 // A plain host name: lower-case ASCII labels of letters, digits and inner hyphens, at least two
-// labels. No `xn--` check is needed because the domain must equal an allowlist entry exactly.
+// labels. In college mode no `xn--` check is needed because the domain must equal an allowlist
+// entry exactly; in open mode any such host name is accepted.
 const HOST_NAME = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
 
 /**
@@ -50,14 +61,15 @@ export function normalizeEmail(email: string): string {
 }
 
 /**
- * True only for `local@domain` where `domain` is exactly one of the allowed domains. Case and
+ * True only for `local@domain` where `domain` is exactly one of the allowed domains, or, with
+ * {@link ANY_DOMAIN}, any plain host name (labels of at most 63 characters). Case and
  * surrounding whitespace are ignored. Anything non-ASCII is refused before it is lower-cased, so
  * lookalikes (Cyrillic `а`, the Kelvin sign, fullwidth `@`) cannot fold into an allowed address.
  * Never throws; non-strings are not allowed.
  */
 export function isAllowedEmail(
   email: unknown,
-  domains: readonly string[] = getAllowedDomains(),
+  domains: DomainPolicy = getAllowedDomains(),
 ): boolean {
   if (typeof email !== "string") {
     return false;
@@ -80,6 +92,9 @@ export function isAllowedEmail(
   const domain = normalized.slice(at + 1);
   if (local.length > MAX_LOCAL_LENGTH || !LOCAL_PART.test(local)) {
     return false;
+  }
+  if (domains === ANY_DOMAIN) {
+    return HOST_NAME.test(domain) && domain.split(".").every((l) => l.length <= MAX_LABEL_LENGTH);
   }
   return domains.includes(domain);
 }

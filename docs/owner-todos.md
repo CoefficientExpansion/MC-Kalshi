@@ -1,10 +1,26 @@
 # Owner to-dos
 
 Things only the owner can do: secrets, accounts, and decisions. Tick them off here and delete a line
-once it is done. Last updated 2026-10-29 (M3 ship; both Supabase projects migrated and seeded).
+once it is done. Last updated 2026-10-29 (open sign-up decision, ADR-0007).
 
 Project refs (public, they appear in every Supabase URL): `dev` = `rikpavorxtcdptclhruh`,
 `prod` = `opefsnkjgmbahwakcegw`.
+
+## NOT DONE: college-only sign-in (hard constraint 2) and code emails
+- [ ] **College-only sign-in (hard constraint 2) and code emails: production runs
+  `SIGN_IN_MODE=open` (ADR-0007).** The owner chose not to set up SMTP (2026-10-29), so anyone can
+  create an account with any email and a password, emails are not verified, and each account gets
+  the signup bonus. To restore college mode (ADR-0007, "Revert"):
+  1. Supabase `prod` -> Authentication -> Emails -> SMTP Settings: configure custom SMTP (for
+     example Gmail with an App Password: host `smtp.gmail.com`, port `465`, sender name = the
+     product name, not "Kalshi").
+  2. Edit the "Confirm sign up" and "Magic Link" templates to show the code, `{{ .Token }}`.
+  3. Authentication -> Sign In / Providers -> Email: turn **Confirm email** back on.
+  4. Authentication -> Hooks: re-enable Before User Created (`public.hook_before_user_created`).
+  5. Vercel -> Production: delete `SIGN_IN_MODE`, then redeploy.
+  6. Sign in with a college address (the code arrives) and with a Gmail address (refused).
+     Open-mode accounts at other domains are then signed out for good (the session check requires
+     a college address again); supersede ADR-0007 and drop its clause from CLAUDE.md.
 
 ## Go live: the steps left (about 15 minutes, in this order)
 Sign-in on `https://mc-kalshi.vercel.app` works once 1–4 are done. Each step keeps secrets out of
@@ -15,7 +31,10 @@ Progress (2026-10-29):
 - Done in Vercel Production: `DATABASE_URL`, `CRON_SECRET`, `DATABASE_CA_CERT` (Supabase Root 2021
   CA, checked against the `prod` pooler's chain and host name), `NEXT_PUBLIC_SUPABASE_URL` and
   `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`. `/api/health` reports `db: "ok"` through the `mc_app` guard.
-- Left: custom SMTP (step 4), then the code email templates and a sign-in check.
+- Decided: no SMTP for now; open sign-up instead (ADR-0007, NOT DONE item above).
+- Left (the orchestrator does these): step 4 below on `prod` (disable the Before User Created hook,
+  turn off Confirm email, set the minimum password length to 10), set `SIGN_IN_MODE=open` in Vercel
+  Production, then step 5.
 - A push to `main` redeploys Production without Vercel's re-authentication code.
 - Vercel refuses a `NEXT_PUBLIC_` variable of type Secret (it reaches the browser anyway): use Config.
 
@@ -42,19 +61,17 @@ Progress (2026-10-29):
    - `NEXT_PUBLIC_SUPABASE_URL` = `https://opefsnkjgmbahwakcegw.supabase.co` (Claude can set this one).
    Do not install the Supabase Vercel integration: it copies the owner password and the service-role
    key into Vercel.
-4. **Custom SMTP on `prod`** (Authentication -> Emails -> SMTP Settings). Supabase's built-in sender
-   only delivers to members of your Supabase team, so without this no student receives a code. The
-   simplest no-domain option is Gmail: turn on 2-Step Verification, create an App Password
-   (Google Account -> Security -> App passwords), then host `smtp.gmail.com`, port `465`, username =
-   your Gmail address, password = the app password, sender = the same address, sender name = the
-   product name (not "Kalshi"). Gmail allows about 500 emails a day. Supabase then allows 30 sign-up
-   emails an hour by default (Authentication -> Rate Limits).
-   Once SMTP is saved the email templates become editable: Claude can set "Confirm sign up" and
-   "Magic Link" to show the 6-digit code (`{{ .Token }}`); the app signs in with the code, and the
-   default templates only contain a link.
+4. **Open sign-up on `prod`, no SMTP** (ADR-0007; replaces the custom-SMTP step). Supabase `prod`:
+   - Authentication -> Hooks: disable Before User Created (otherwise non-college sign-ups get 403).
+   - Authentication -> Sign In / Providers -> Email: turn **Confirm email** off (otherwise sign-up
+     returns no session and the page says confirmation is needed) and set the minimum password
+     length to 10.
+   - Vercel -> mc-kalshi -> Settings -> Environment Variables, **Production** only:
+     `SIGN_IN_MODE` = `open` (not secret; never a `NEXT_PUBLIC_` variable).
 5. **Redeploy** (Vercel -> Deployments -> latest Production -> Redeploy), then check
-   `https://mc-kalshi.vercel.app/api/health` reports `db: "ok"`, sign in once with a college address
-   (10,000 points appear) and once with a Gmail address (refused).
+   `https://mc-kalshi.vercel.app/api/health` reports `db: "ok"`, create an account with any email
+   and a 10+ character password (10,000 points appear), sign out, sign in again (no second bonus),
+   and try a wrong password ("Email or password is wrong.").
 
 ## Done (2026-10-29)
 - [x] M1, M2 and M3 merged to `main`.
@@ -63,7 +80,8 @@ Progress (2026-10-29):
   markets seeded, RLS on all 11 tables, append-only triggers present, no Data API grants, `mc_app`
   created without login and without UPDATE on `role`/`suspended_at` or any ledger UPDATE/DELETE.
 - [x] Before User Created hook enabled on `dev` and `prod` (`public.hook_before_user_created`): only
-  `@maryvillecollege.edu` and `@my.maryvillecollege.edu` addresses can create accounts.
+  `@maryvillecollege.edu` and `@my.maryvillecollege.edu` addresses can create accounts. On `prod`
+  it is to be disabled for open sign-up (ADR-0007); re-enable it to restore college mode.
 - [x] Email code: 6 digits, 10-minute expiry, on `dev` and `prod`.
 - [x] Auth URLs: `prod` Site URL `https://mc-kalshi.vercel.app`; `dev` Site URL
   `http://localhost:3000` plus the preview URL pattern.
@@ -107,6 +125,7 @@ Progress (2026-10-29):
 ## Before beta
 - [ ] Public product name and favicon (Decisions).
 - [ ] Go-live steps 1–5 done; a human has run the full sign-in and trade loop on `prod`.
+- [ ] College-only sign-in restored, or the open test explicitly accepted for beta (NOT DONE item).
 - [ ] Market-page sign-in decision applied.
 - [ ] Architecture §11 answered (compliance sign-off first), two moderators named.
 - [ ] Supabase free tier pauses idle projects: keep the invariant cron hitting `prod`, or upgrade.

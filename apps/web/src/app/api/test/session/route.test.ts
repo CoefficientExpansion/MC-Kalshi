@@ -126,6 +126,18 @@ describe("POST /api/test/session with the guard on", () => {
     expect(await db.select().from(profiles).where(eq(profiles.email, "eve@gmail.com"))).toEqual([]);
   });
 
+  it("accepts any well-formed address in open mode (ADR-0007), and still refuses bad syntax", async () => {
+    vi.stubEnv("SIGN_IN_MODE", "open");
+    const res = await post({ email: "Dana@Gmail.com" });
+    expect(res.status).toBe(200);
+    const { userId } = (await res.json()) as { userId: string };
+    const [profile] = await db.select().from(profiles).where(eq(profiles.id, userId));
+    expect(profile?.email).toBe("dana@gmail.com");
+    for (const email of ["dana@localhost", "a@b@gmail.com", ""]) {
+      expect((await post({ email })).status).toBe(400);
+    }
+  });
+
   it("refuses a malformed body", async () => {
     for (const body of ["not json", "[]", "null"]) {
       const res = await post(body);

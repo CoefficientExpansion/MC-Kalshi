@@ -15,7 +15,7 @@ Code is the primary implementer.
 
 ## Hard constraints (do not relax without an ADR)
 1. Play money only. No payments, prizes, cash-out, or purchase of points. UI copy never says "bet", "$", or "cash out".
-2. Sign-in restricted to Maryville College addresses (`@maryvillecollege.edu`, `@my.maryvillecollege.edu`), enforced at the auth layer, not in the UI.
+2. Sign-in restricted to Maryville College addresses (`@maryvillecollege.edu`, `@my.maryvillecollege.edu`), enforced at the auth layer, not in the UI (temporarily relaxed in production by ADR-0007 while `SIGN_IN_MODE=open`).
 3. Every point movement is an append-only ledger entry; balances are derived caches, never edited directly.
 4. A trade is one DB transaction with the market row locked (`FOR UPDATE`); all market math lives in `packages/engine` and is pure (no I/O).
 5. Kalshi is studied for behavior and UX only. Never copy its code, assets, branding, or scrape at volume. See `docs/sops/SOP-03-reverse-engineering-with-rea.md`.

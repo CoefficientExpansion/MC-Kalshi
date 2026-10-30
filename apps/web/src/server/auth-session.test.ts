@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getCurrentUser, getSessionMember } from "./auth";
-import type { SessionMember } from "./auth-flow";
+import { ANY_DOMAIN, DEFAULT_ALLOWED_DOMAINS } from "./auth-email";
+import { type SessionMember, sessionMemberForClaims } from "./auth-flow";
 
 // The request-bound wrappers in auth.ts: getSessionMember keeps a suspended member (so the trade
 // action can answer account_suspended), getCurrentUser still treats one as signed out.
@@ -106,6 +107,24 @@ describe("getSessionMember and getCurrentUser", () => {
     mocks.check = "refused";
     expect(await getSessionMember()).toBeNull();
     expect(await getCurrentUser()).toBeNull();
+  });
+
+  it("checks the session against the college domains in college mode and any domain in open mode", async () => {
+    const check = vi.mocked(sessionMemberForClaims);
+    mocks.session = session(false);
+    for (const [mode, expected] of [
+      [undefined, DEFAULT_ALLOWED_DOMAINS],
+      ["", DEFAULT_ALLOWED_DOMAINS],
+      ["OPEN", DEFAULT_ALLOWED_DOMAINS],
+      ["open", ANY_DOMAIN],
+    ] as const) {
+      vi.stubEnv("SIGN_IN_MODE", mode);
+      vi.stubEnv("ALLOWED_EMAIL_DOMAINS", undefined);
+      check.mockClear();
+      await getSessionMember();
+      expect(check, String(mode)).toHaveBeenCalledWith(mocks.db, mocks.claims, expected);
+    }
+    vi.unstubAllEnvs();
   });
 
   it("both return null, without throwing, when the connection check fails", async () => {

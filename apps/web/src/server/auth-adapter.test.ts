@@ -83,4 +83,67 @@ describe("adaptSupabaseAuth", () => {
       expect(signOut).toHaveBeenCalledWith({ scope: "local" });
     });
   });
+
+  // Open mode (ADR-0007): email and password.
+  const passwordArgs = { email: "a@gmail.com", password: "correct horse battery" };
+  const fullUser = { id: "u1", email: "a@gmail.com", app_metadata: {}, aud: "x" };
+
+  describe("signUp", () => {
+    it("passes the email and password through and reports whether a session exists", async () => {
+      const signUp = vi.fn(async () => ({
+        data: { user: fullUser, session: { access_token: "t" } },
+        error: null,
+      }));
+      expect(await adaptSupabaseAuth(stub({ signUp })).signUp(passwordArgs)).toEqual({
+        user: { id: "u1", email: "a@gmail.com" },
+        hasSession: true,
+        error: null,
+      });
+      expect(signUp).toHaveBeenCalledWith(passwordArgs);
+    });
+
+    it("reports no session when Confirm email is on", async () => {
+      const signUp = async () => ({ data: { user: fullUser, session: null }, error: null });
+      expect(await adaptSupabaseAuth(stub({ signUp })).signUp(passwordArgs)).toEqual({
+        user: { id: "u1", email: "a@gmail.com" },
+        hasSession: false,
+        error: null,
+      });
+    });
+
+    it("maps an existing-account error", async () => {
+      const signUp = async () => ({
+        data: { user: null, session: null },
+        error: new AuthApiError("User already registered", 422, "user_already_exists"),
+      });
+      expect(await adaptSupabaseAuth(stub({ signUp })).signUp(passwordArgs)).toEqual({
+        user: null,
+        hasSession: false,
+        error: { status: 422, code: "user_already_exists" },
+      });
+    });
+  });
+
+  describe("signInWithPassword", () => {
+    it("passes the email and password through and returns id and email only", async () => {
+      const signInWithPassword = vi.fn(async () => ({
+        data: { user: fullUser, session: { access_token: "t" } },
+        error: null,
+      }));
+      expect(
+        await adaptSupabaseAuth(stub({ signInWithPassword })).signInWithPassword(passwordArgs),
+      ).toEqual({ user: { id: "u1", email: "a@gmail.com" }, error: null });
+      expect(signInWithPassword).toHaveBeenCalledWith(passwordArgs);
+    });
+
+    it("maps invalid credentials", async () => {
+      const signInWithPassword = async () => ({
+        data: { user: null, session: null },
+        error: new AuthApiError("Invalid login credentials", 400, "invalid_credentials"),
+      });
+      expect(
+        await adaptSupabaseAuth(stub({ signInWithPassword })).signInWithPassword(passwordArgs),
+      ).toEqual({ user: null, error: { status: 400, code: "invalid_credentials" } });
+    });
+  });
 });

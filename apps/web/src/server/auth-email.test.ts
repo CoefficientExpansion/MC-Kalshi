@@ -1,6 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
+  ANY_DOMAIN,
   DEFAULT_ALLOWED_DOMAINS,
   getAllowedDomains,
   isAllowedEmail,
@@ -201,5 +202,54 @@ describe("isAllowedEmail", () => {
         ),
       );
     });
+  });
+});
+
+describe("isAllowedEmail with the allow-any policy (open mode, ADR-0007)", () => {
+  it("accepts a well-formed address at any plain host name", () => {
+    for (const email of [
+      "jane@gmail.com",
+      " Jane.Doe+x@Outlook.COM ",
+      "a@maryvillecollege.edu",
+      "o'neil@sub.example.co.uk",
+    ]) {
+      expect(isAllowedEmail(email, ANY_DOMAIN), email).toBe(true);
+    }
+  });
+
+  it("still applies every syntax rule: one @, ASCII, length limits, plain host", () => {
+    for (const email of [
+      "",
+      "jane",
+      "jane@",
+      "@gmail.com",
+      "a@b@gmail.com",
+      "jane@localhost",
+      "jane@gmail.com.",
+      "jane@-gmail.com",
+      "jane@gmail.com:25",
+      "jane doe@gmail.com",
+      "jane@gmail.com\nb@x.com",
+      '"a b"@gmail.com',
+      ".jane@gmail.com",
+      "ja..ne@gmail.com",
+      "jаne@gmail.com",
+      "x＠gmail.com",
+      "<jane@gmail.com>",
+      `${"a".repeat(65)}@gmail.com`,
+      `a@${"b".repeat(250)}.com`,
+      5,
+      null,
+    ]) {
+      expect(isAllowedEmail(email, ANY_DOMAIN), String(email)).toBe(false);
+    }
+  });
+
+  it("accepts every address the college table accepts", () => {
+    for (const { email, allowed } of ALLOWED_EMAIL_CASES) {
+      if (allowed) {
+        expect(isAllowedEmail(email, ANY_DOMAIN), email).toBe(true);
+      }
+    }
   });
 });

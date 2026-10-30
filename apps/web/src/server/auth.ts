@@ -6,7 +6,7 @@ import { cache } from "react";
 import { type Db, getDb, getDbChecked } from "@/db";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getAllowedDomains, isAllowedEmail } from "./auth-email";
+import { isAllowedEmail } from "./auth-email";
 import {
   type AuthDeps,
   type OtpClient,
@@ -14,16 +14,37 @@ import {
   sessionMemberForClaims,
   signOutOf,
 } from "./auth-flow";
+import type { PasswordAuthDeps, PasswordClient } from "./auth-password";
 import { E2E_SESSION_COOKIE, isE2EAuthEnabled, readE2ESession } from "./e2e-auth";
 import { getSignupBonusPoints, loadProfileMember, type Member } from "./profiles";
+import { getEmailDomainPolicy, getSignInMode } from "./sign-in-mode";
 
 export type { SessionMember } from "./auth-flow";
 
 // Next.js-bound auth: the current member for a request, and the real wiring for `auth-flow.ts`.
 
-/** Adapt Supabase's client to the small interface the sign-in flow is written against. */
-export function adaptSupabaseAuth(supabase: SupabaseClient): OtpClient {
+/**
+ * Adapt Supabase's client to the small interfaces the sign-in flows are written against: the code
+ * flow (`auth-flow.ts`) and the open-mode password flow (`auth-password.ts`). Only `{status, code}`
+ * of an error and `{id, email}` of a user cross over; never the provider's message text.
+ */
+export function adaptSupabaseAuth(supabase: SupabaseClient): OtpClient & PasswordClient {
   return {
+    async signUp(args) {
+      const { data, error } = await supabase.auth.signUp(args);
+      return {
+        user: data.user ? { id: data.user.id, email: data.user.email } : null,
+        hasSession: data.session !== null && data.session !== undefined,
+        error: error ? { status: error.status, code: error.code } : null,
+      };
+    },
+    async signInWithPassword(args) {
+      const { data, error } = await supabase.auth.signInWithPassword(args);
+      return {
+        user: data.user ? { id: data.user.id, email: data.user.email } : null,
+        error: error ? { status: error.status, code: error.code } : null,
+      };
+    },
     async signInWithOtp(args) {
       const { error } = await supabase.auth.signInWithOtp(args);
       return { error: error ? { status: error.status, code: error.code } : null };
@@ -42,15 +63,21 @@ export function adaptSupabaseAuth(supabase: SupabaseClient): OtpClient {
   };
 }
 
-/** Everything the sign-in flow needs for this request; `client`/`db` are undefined when unset. */
-export async function getAuthDeps(): Promise<AuthDeps> {
+/**
+ * Everything the sign-in flows need for this request; `client`/`db` are undefined when unset.
+ * `open` is true only with `SIGN_IN_MODE=open` (ADR-0007), which also widens `domains` to any.
+ */
+export async function getAuthDeps(): Promise<
+  AuthDeps<OtpClient & PasswordClient> & PasswordAuthDeps
+> {
   const supabase = await createSupabaseServerClient();
   return {
     client: supabase ? adaptSupabaseAuth(supabase) : undefined,
     // A failed connection check reads as unconfigured; the sign-in flow then says so.
     db: await getDbChecked().catch(() => undefined),
-    domains: getAllowedDomains(),
+    domains: getEmailDomainPolicy(),
     bonusPoints: getSignupBonusPoints(),
+    open: getSignInMode() === "open",
   };
 }
 
@@ -89,7 +116,7 @@ export const getSessionMember = cache(async (): Promise<SessionMember | null> =>
     }
     const supabase = await createSupabaseServerClient();
     const { data } = (await supabase?.auth.getClaims()) ?? {};
-    return await sessionMemberForClaims(db, data?.claims, getAllowedDomains());
+    return await sessionMemberForClaims(db, data?.claims, getEmailDomainPolicy());
   } catch (e) {
     console.error(`[auth] current user lookup failed: ${e instanceof Error ? e.name : "unknown"}`);
     return null;
@@ -108,7 +135,7 @@ async function e2eSessionMember(db: Db) {
     return null;
   }
   const found = await loadProfileMember(db, userId);
-  if (!found || !isAllowedEmail(found.member.email, getAllowedDomains())) {
+  if (!found || !isAllowedEmail(found.member.email, getEmailDomainPolicy())) {
     return null;
   }
   return { userId: found.member.id, profile: found.member, suspended: found.suspended };

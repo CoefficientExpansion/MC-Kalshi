@@ -108,6 +108,16 @@ describe("e2e-session cookie with the guard on", () => {
     expect(await getSessionMember()).toBeNull();
   });
 
+  it("accepts a profile at any domain in open mode (ADR-0007), and still refuses bad syntax", async () => {
+    vi.stubEnv("SIGN_IN_MODE", "open");
+    mocks.cookie = validCookie();
+    const gmail = { ...PROFILE, email: "e2e@gmail.com" };
+    mocks.found = { member: gmail, suspended: false };
+    expect(await getSessionMember()).toEqual({ userId: USER, profile: gmail, suspended: false });
+    mocks.found = { member: { ...PROFILE, email: "not an address" }, suspended: false };
+    expect(await getSessionMember()).toBeNull();
+  });
+
   it("ignores an expired cookie, one signed with another secret, and garbage", async () => {
     for (const value of [
       signE2ESession(USER, Date.now() - 1000, SECRET),

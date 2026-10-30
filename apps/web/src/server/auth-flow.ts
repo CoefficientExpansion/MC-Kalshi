@@ -1,6 +1,6 @@
 import "server-only";
 import type { AnyDb } from "@/db/types";
-import { isAllowedEmail, normalizeEmail } from "./auth-email";
+import { type DomainPolicy, isAllowedEmail, normalizeEmail } from "./auth-email";
 import { ensureProfile, loadProfileMember, type Member, ProfileError } from "./profiles";
 
 // The sign-in steps, free of Next.js and of the Supabase SDK so they run against fakes in tests.
@@ -8,9 +8,16 @@ import { ensureProfile, loadProfileMember, type Member, ProfileError } from "./p
 //
 // Order of defence (CLAUDE.md hard constraint 2): the guard is the Postgres hook in Supabase Auth;
 // the checks here are the second layer and give a readable message instead of a raw API error.
+// In open mode (ADR-0007, `auth-password.ts`) the hook is off and the domain policy allows any
+// address; `completeSignIn` below is shared by both flows.
+
+/** Ending this browser's session: the one call every sign-in flow needs to refuse a session. */
+export interface SignOutClient {
+  signOut(scope?: "local"): Promise<{ error: AuthApiError | null }>;
+}
 
 /** The slice of Supabase's auth API this flow uses (see `adaptSupabaseAuth` in `auth.ts`). */
-export interface OtpClient {
+export interface OtpClient extends SignOutClient {
   signInWithOtp(args: {
     email: string;
     options: { shouldCreateUser: boolean };
@@ -19,7 +26,6 @@ export interface OtpClient {
     user: { id: string; email?: string | null } | null;
     error: AuthApiError | null;
   }>;
-  signOut(scope?: "local"): Promise<{ error: AuthApiError | null }>;
 }
 
 export interface AuthApiError {
@@ -27,12 +33,13 @@ export interface AuthApiError {
   readonly code?: string;
 }
 
-export interface AuthDeps {
+export interface AuthDeps<C extends SignOutClient = OtpClient> {
   /** `undefined` when the Supabase env vars are not set. */
-  readonly client: OtpClient | undefined;
+  readonly client: C | undefined;
   /** `undefined` when `DATABASE_URL` is not set. */
   readonly db: AnyDb | undefined;
-  readonly domains: readonly string[];
+  /** The college allowlist, or `ANY_DOMAIN` in open mode (`getEmailDomainPolicy`). */
+  readonly domains: DomainPolicy;
   readonly bonusPoints: number;
 }
 
@@ -45,7 +52,15 @@ export type AuthErrorCode =
   | "send_failed"
   | "suspended"
   | "account_conflict"
-  | "unavailable";
+  | "unavailable"
+  // Open mode only (ADR-0007, `auth-password.ts`).
+  | "password_off"
+  | "email_format"
+  | "password_length"
+  | "weak_password"
+  | "wrong_credentials"
+  | "signup_failed"
+  | "confirmation_required";
 
 export type AuthFailure = {
   readonly ok: false;
@@ -66,15 +81,28 @@ const MESSAGES: Record<AuthErrorCode, string> = {
   account_conflict:
     "This email is already linked to a different account. Ask a moderator for help.",
   unavailable: "Something went wrong on our side. Try again in a minute.",
+  password_off: "Sign-in with a password is not available here. Use the emailed code.",
+  email_format: "Enter a valid email address.",
+  password_length: "Use a password of 10 to 72 characters.",
+  weak_password: "That password is too easy to guess. Choose a different one.",
+  // The same answer for a wrong password and an unknown account: no account enumeration.
+  wrong_credentials: "Email or password is wrong.",
+  signup_failed: "Could not create that account. If you already have one, sign in.",
+  confirmation_required:
+    "Sign-up needs email confirmation, which is turned off for now. Ask the site owner.",
 };
 
-const fail = (code: AuthErrorCode): AuthFailure => ({ ok: false, code, message: MESSAGES[code] });
+export const fail = (code: AuthErrorCode): AuthFailure => ({
+  ok: false,
+  code,
+  message: MESSAGES[code],
+});
 
-const isRateLimit = (e: AuthApiError) =>
+export const isRateLimit = (e: AuthApiError) =>
   e.status === 429 || (e.code?.startsWith("over_") && e.code.endsWith("_rate_limit")) === true;
 
 /** Log the kind of failure only: never an email address or a code (SOP-09). */
-function logFailure(where: string, e: AuthApiError | Error) {
+export function logFailure(where: string, e: AuthApiError | Error) {
   const detail = e instanceof Error ? e.name : `status=${e.status ?? "?"} code=${e.code ?? "?"}`;
   console.error(`[auth] ${where} failed: ${detail}`);
 }
@@ -146,13 +174,31 @@ export async function verifyEmailCode(
   if (!user) {
     return fail("invalid_code");
   }
+  return completeSignIn({ client, db, domains: deps.domains, bonusPoints: deps.bonusPoints }, user);
+}
 
+/**
+ * After any sign-in that left a session (`verifyOtp`, or in open mode `signUp` /
+ * `signInWithPassword`): check the account's address against the domain policy, create the
+ * profile and credit the signup bonus once through the ledger (idempotent, `ensureProfile`), and
+ * refuse a suspended member. Every refusal signs the session out. Never logs an address.
+ */
+export async function completeSignIn(
+  deps: {
+    readonly client: SignOutClient;
+    readonly db: AnyDb;
+    readonly domains: DomainPolicy;
+    readonly bonusPoints: number;
+  },
+  user: { readonly id: string; readonly email?: string | null },
+): Promise<{ readonly ok: true } | AuthFailure> {
+  const { client, db } = deps;
   const refuse = async (code: AuthErrorCode): Promise<AuthFailure> => {
     await signOutOf(client);
     return fail(code);
   };
 
-  // Trust the address Supabase attached to the verified account, not the form field.
+  // Trust the address Supabase attached to the account, not the form field.
   if (!isAllowedEmail(user.email, deps.domains)) {
     return refuse("not_allowed");
   }
@@ -176,7 +222,7 @@ export async function verifyEmailCode(
 }
 
 /** End this browser's session only (not the member's other devices). Never throws. */
-export async function signOutOf(client: OtpClient | undefined): Promise<void> {
+export async function signOutOf(client: SignOutClient | undefined): Promise<void> {
   if (!client) {
     return;
   }
@@ -207,7 +253,7 @@ export interface SessionMember {
 export async function sessionMemberForClaims(
   db: AnyDb,
   claims: { readonly sub?: unknown; readonly email?: unknown } | undefined,
-  domains: readonly string[],
+  domains: DomainPolicy,
 ): Promise<SessionMember | null> {
   const sub = claims?.sub;
   if (typeof sub !== "string" || !UUID.test(sub)) {
@@ -236,7 +282,7 @@ export async function sessionMemberForClaims(
 export async function memberForClaims(
   db: AnyDb,
   claims: { readonly sub?: unknown; readonly email?: unknown } | undefined,
-  domains: readonly string[],
+  domains: DomainPolicy,
 ): Promise<Member | null> {
   const session = await sessionMemberForClaims(db, claims, domains);
   return session && !session.suspended ? session.profile : null;

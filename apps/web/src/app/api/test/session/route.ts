@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getDbChecked } from "@/db";
-import { getAllowedDomains, isAllowedEmail, normalizeEmail } from "@/server/auth-email";
+import { isAllowedEmail, normalizeEmail } from "@/server/auth-email";
 import {
   E2E_SESSION_COOKIE,
   E2E_SESSION_MAX_AGE_SEC,
@@ -9,10 +9,11 @@ import {
   signE2ESession,
 } from "@/server/e2e-auth";
 import { ensureProfile, getSignupBonusPoints, ProfileError } from "@/server/profiles";
+import { getEmailDomainPolicy } from "@/server/sign-in-mode";
 
 // CI-only sign-in for the Playwright suite (docs/specs/m3-trading.md, "Playwright e2e", the
-// fallback). A bare 404 unless isE2EAuthEnabled() (never on Vercel). Otherwise an allowed college
-// email gets its profile and signup bonus through ensureProfile (the normal first sign-in code)
+// fallback). A bare 404 unless isE2EAuthEnabled() (never on Vercel). Otherwise an allowed email
+// (a college address; any address with SIGN_IN_MODE=open, ADR-0007) gets its profile and signup bonus through ensureProfile (the normal first sign-in code)
 // and a signed, short-lived `e2e-session` cookie that getSessionMember accepts.
 export const dynamic = "force-dynamic";
 
@@ -39,7 +40,7 @@ export async function POST(request: Request): Promise<Response> {
     typeof body === "object" && body !== null && !Array.isArray(body)
       ? (body as { email?: unknown }).email
       : undefined;
-  if (typeof raw !== "string" || !isAllowedEmail(raw, getAllowedDomains())) {
+  if (typeof raw !== "string" || !isAllowedEmail(raw, getEmailDomainPolicy())) {
     return refuse(400, "not_allowed");
   }
   const db = await getDbChecked().catch(() => undefined);
