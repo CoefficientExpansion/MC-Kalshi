@@ -10,6 +10,14 @@ Project refs (public, they appear in every Supabase URL): `dev` = `rikpavorxtcdp
 Sign-in on `https://mc-kalshi.vercel.app` works once 1–4 are done. Each step keeps secrets out of
 chat; none needs a terminal except to generate random values.
 
+Progress (2026-10-29):
+- Done: steps 1–2 (`mc_app` can log in on `prod`: not superuser, no BYPASSRLS).
+- Done in Vercel Production: `DATABASE_URL`, `CRON_SECRET`, `DATABASE_CA_CERT` (Supabase Root 2021
+  CA, checked against the `prod` pooler's chain and host name) and `NEXT_PUBLIC_SUPABASE_URL`.
+- Left: `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` (step 3), custom SMTP (step 4), then the code email
+  templates and a sign-in check.
+- A push to `main` redeploys Production without Vercel's re-authentication code.
+
 1. **Generate two random values** (PowerShell; each command copies a 64-character hex string to the
    clipboard and prints nothing). Paste each one straight where it goes, then clear the clipboard.
    ```powershell
